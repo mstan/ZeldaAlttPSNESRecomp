@@ -7,6 +7,75 @@
 #include "debug_server.h"
 #include "cpu_trace.h"
 
+/* HLE the polyhedral coroutine that the SNES runs on a separate stack
+ * (NMI tail context-switches into it; it loops at $09:F81D, runs one
+ * slice of Poly_RunFrame, then yields back to main).
+ *
+ * Our HLE invokes Interrupt_NMI as a plain C call, so the context
+ * switch into $09:F81D never executes — `intro_did_run_step` ($7E:1F00)
+ * latches at 1 after Intro_AnimateTriforce's first call, and
+ * Intro_RunStep is never re-entered. submodule_index sticks at 3
+ * (Intro_HandleAllTriforceAnimations only animates; the transition to
+ * submodule 4 lives inside Intro_RunStep's case 1, gated on poly_config1
+ * decrementing below 225).
+ *
+ * Mirror the poly thread's loop body exactly (asm at $09:F81D):
+ *   if ($7E:1F00 == 0) return;            ; intro_did_run_step
+ *   if ($7E:1F0C != 0) return;            ; nmi_flag_update_polyhedral
+ *   JSL Polyhedral_EmptyBitMapBuffer
+ *   JSR Polyhedral_SetShapePointer
+ *   JSR Polyhedral_SetRotationMatrix
+ *   JSR Polyhedral_OperateRotation
+ *   JSR Polyhedral_DrawPolyhedron
+ *   STZ $00      ; intro_did_run_step = 0
+ *   LDA #$FF     ; (m=1)
+ *   STA $0C      ; nmi_flag_update_polyhedral = $FF
+ *
+ * One slice per host frame. NMI_UpdateIRQGFX at $80:9347 will clear
+ * nmi_flag_update_polyhedral back to 0 on the next vblank-equivalent
+ * (it's emitted by the recomp as part of Interrupt_NMI's chain), so the
+ * two-flag handshake remains intact.
+ *
+ * Poly thread enters at $09:F81D with D=$1F00, DB=$09, PB=$09, P=$30
+ * (m=1, x=1) per kPolyThreadInit. Call the M1X1 variants; save/restore
+ * main-thread CPU context around the slice so subsequent main-thread
+ * code keeps D=DB=PB=0.
+ */
+static void ZeldaRunPolyLoop(void) {
+  if (g_ram[0x1F00] == 0)    return;   /* intro_did_run_step */
+  if (g_ram[0x1F0C] != 0)    return;   /* nmi_flag_update_polyhedral */
+
+  const uint16 saved_D  = g_cpu.D;
+  const uint8  saved_DB = g_cpu.DB;
+  const uint8  saved_PB = g_cpu.PB;
+  const uint8  saved_P  = g_cpu.P;
+  const uint8  saved_m  = g_cpu.m_flag;
+  const uint8  saved_x  = g_cpu.x_flag;
+
+  g_cpu.D      = 0x1F00;
+  g_cpu.DB     = 0x09;
+  g_cpu.PB     = 0x09;
+  g_cpu.P      = 0x30;            /* m=1, x=1, others clear */
+  cpu_p_to_mirrors(&g_cpu);
+
+  Polyhedral_EmptyBitMapBuffer_M1X1(&g_cpu);
+  Polyhedral_SetShapePointer_M1X1(&g_cpu);
+  Polyhedral_SetRotationMatrix_M1X1(&g_cpu);
+  Polyhedral_OperateRotation_M1X1(&g_cpu);
+  Polyhedral_DrawPolyhedron_M1X1(&g_cpu);
+
+  g_cpu.D      = saved_D;
+  g_cpu.DB     = saved_DB;
+  g_cpu.PB     = saved_PB;
+  g_cpu.P      = saved_P;
+  g_cpu.m_flag = saved_m;
+  g_cpu.x_flag = saved_x;
+  cpu_p_to_mirrors(&g_cpu);
+
+  g_ram[0x1F00] = 0x00;
+  g_ram[0x1F0C] = 0xFF;
+}
+
 void ZeldaDrawPpuFrame(void) {
   SimpleHdma hdma_chans[3];
 
@@ -112,6 +181,9 @@ void ZeldaRunOneFrameOfGame(void) {
     g_cpu.DB = 0x00;
     g_cpu.PB = 0x00;
     cpu_trace_px_breadcrumb(&g_cpu, 0x2001, "after_I_NMI");
+    /* One slice of the polyhedral coroutine per host frame. See
+     * ZeldaRunPolyLoop comment for the leak this fixes. */
+    ZeldaRunPolyLoop();
   }
   cpu_trace_px_breadcrumb(&g_cpu, 0x2002, "before_Internal");
   /* Rearm the P.X tripwire here so the first x=1→0 transition INSIDE
