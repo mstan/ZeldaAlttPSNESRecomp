@@ -35,14 +35,9 @@ extern uint16 counter_global_frames;
  * differs per game because the SNES ROM author picks the DP slot. */
 #define waiting_for_vblank (*(uint8*)(g_ram + 0x12))
 
-/* DMA / HDMA mirror — written by the recompiled NMI handler and
- * read by ZeldaDrawPpuFrame to drive snes9x's HDMA channels.
- * Address $00:420C in SMW; mirroring is host-side so we can read
- * the value without going through the PPU.
- *
- * Without a disasm we don't yet know if ALttP uses HDMA the same
- * way SMW does. Stub for now; if it's unused the build still works,
- * if it's used wrong we'll surface it at runtime. */
-extern uint8  mirror_hdmaenable;
+/* ALttP's WRAM mirror of the value NMI writes to $420C (HDMAEN). The
+ * host draw path consumes the post-main-loop value here so scanline
+ * HDMA reflects the frame that is about to be rendered. */
+#define HDMAEN_copy (*(uint8*)(g_ram + 0x009B))
 
 #endif /* VARIABLES_H */

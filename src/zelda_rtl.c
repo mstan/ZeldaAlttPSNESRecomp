@@ -76,12 +76,22 @@ static void ZeldaRunPolyLoop(void) {
   g_ram[0x1F0C] = 0xFF;
 }
 
+static void ZeldaRestoreMainCpuAbi(void) {
+  /* Host-frame entry/exit calls are not real JSR/IRQ return paths. Keep the
+   * top-level main stack at the reset-loop baseline before handing control
+   * back to generated game code. */
+  g_cpu.S  = 0x01FF;
+  g_cpu.D  = 0x0000;
+  g_cpu.DB = 0x00;
+  g_cpu.PB = 0x00;
+}
+
 void ZeldaDrawPpuFrame(void) {
   SimpleHdma hdma_chans[3];
 
   Dma *dma = g_dma;
 
-  dma_startDma(dma, mirror_hdmaenable, true);
+  dma_startDma(dma, HDMAEN_copy, true);
 
   SimpleHdma_Init(&hdma_chans[0], &dma->channel[5]);
   SimpleHdma_Init(&hdma_chans[1], &dma->channel[6]);
@@ -101,8 +111,10 @@ void ZeldaDrawPpuFrame(void) {
       // other sources. recomp_hw.c's ReadReg(0x4211) returns g_snes->inIrq<<7
       // and clears the flag; assert it here so the handler takes the
       // timer-IRQ path instead of exiting immediately.
+      CpuState saved_cpu = g_cpu;
       g_snes->inIrq = true;
       I_IRQ(&g_cpu);
+      g_cpu = saved_cpu;
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
@@ -157,6 +169,7 @@ void ZeldaRunOneFrameOfGame(void) {
   // (RDNMI) returns bit 7 = 1, matching real hardware. snes_readReg
   // clears the latch on read.
   if (g_first_frame_done) {
+    CpuState saved_cpu = g_cpu;
     g_snes->inNmi = true;
     /* NMI handler at $00:80C9. zelda3 names it Interrupt_NMI; recompiler
      * emits the body under that name (no `I_NMI` alias). */
@@ -175,24 +188,25 @@ void ZeldaRunOneFrameOfGame(void) {
      * dispatches case 0 → Intro_Init, jingle replays every cycle.
      * Snes9x oracle confirmed: real game has submodule_index at
      * $7E:0011 (D=0); recomp had it at $7E:1F11 (D=$1F00). Restore
-     * main-thread DP/DB/PB here so subsequent C-host module calls
-     * see the correct memory map. */
-    g_cpu.D  = 0x0000;
-    g_cpu.DB = 0x00;
-    g_cpu.PB = 0x00;
+     * main-thread CPU state here so the stack-switch branch cannot leak
+     * S/A/X/Y/P either. Then re-establish the host ABI's D/DB/PB=0
+     * contract so subsequent C-host module calls see the correct memory map. */
+    g_cpu = saved_cpu;
+    ZeldaRestoreMainCpuAbi();
     cpu_trace_px_breadcrumb(&g_cpu, 0x2001, "after_I_NMI");
     /* One slice of the polyhedral coroutine per host frame. See
      * ZeldaRunPolyLoop comment for the leak this fixes. */
     ZeldaRunPolyLoop();
   }
   cpu_trace_px_breadcrumb(&g_cpu, 0x2002, "before_Internal");
+  ZeldaRestoreMainCpuAbi();
   /* Rearm the P.X tripwire here so the first x=1→0 transition INSIDE
    * Internal() (the main game loop) is captured fresh. The earlier
    * boot-time REP #$38 in I_RESET is expected and intentional; we only
    * want to know where x flips during ProcessGameMode dispatch. */
   cpu_trace_arm_px_tripwire();
   ZeldaRunOneFrameOfGame_Internal();
+  ZeldaRestoreMainCpuAbi();
   cpu_trace_px_breadcrumb(&g_cpu, 0x2003, "after_Internal");
   g_first_frame_done = true;
 }
-

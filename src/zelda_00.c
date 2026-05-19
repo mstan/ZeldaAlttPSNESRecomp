@@ -4,12 +4,10 @@
 #include "variables.h"
 
 /* Storage for the host-protocol variables declared in variables.h.
- * counter_global_frames drives framework-side frame counting;
- * mirror_hdmaenable is read by ZeldaDrawPpuFrame to feed snes9x's
- * HDMA channels. (waiting_for_vblank is a macro for g_ram[0x12] —
- * SNES WRAM, no separate host storage.) */
+ * counter_global_frames drives framework-side frame counting.
+ * waiting_for_vblank and HDMAEN_copy are WRAM macros, so they need no
+ * separate host storage. */
 uint16 counter_global_frames = 0;
-uint8  mirror_hdmaenable = 0;
 
 
 /* Host-side replacement for the asm main-loop spinlock at
