@@ -590,15 +590,14 @@ int main(int argc, char** argv) {
    * On success, replace argv so the existing ReadWholeFile + oracle init
    * paths below pick up the resolved path without further changes.
    *
-   * CRC32 of Super Mario World (USA), unheadered 512KB. The launcher
-   * skips a 512-byte SMC copier header automatically before hashing,
-   * so headered and unheadered dumps both verify against this value. */
+   * The launcher auto-strips a 512-byte SMC copier header before hashing,
+   * so headered and unheadered dumps both verify against the same CRC. */
   static char rom_path_buf[512];
   {
-    /* ALttP USA hack-variant ROM in current local checkout (h1C):
-     * crc32 = 0x8137C34Du. Canonical USA 1.0 vanilla is 0x777AAC2Fu;
-     * if you have a vanilla dump replace this constant. */
-    static const uint32_t kZeldaUsaCrc32 = 0x8137C34Du;
+    /* Canonical "Legend of Zelda, The - A Link to the Past (USA).sfc"
+     * (no-intro): unheadered 1 MiB LoROM, CRC32 = 0x777AAC2F. The launcher
+     * re-prompts on mismatch via the Win32 file picker. */
+    static const uint32_t kZeldaUsaCrc32 = 0x777AAC2Fu;
     char *la_argv[2] = {
       (char *)"zelda",
       (char *)((argc >= 1 && argv[0]) ? argv[0] : "")

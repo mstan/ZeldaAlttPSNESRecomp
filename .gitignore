@@ -60,11 +60,15 @@ hw_trace.log
 
 # Screenshots / scratch BMPs
 *.bmp
-_zelda_*.bmp
+
+# Per-session debugging / triage scratch (any underscore-prefixed file
+# at the repo root is treated as scratch and not committed).
+_*
 
 # NuGet packages (restored on build)
 packages/
 
 # Release artifacts (built locally, uploaded via gh release upload)
-SuperMarioWorldRecomp-windows-*.zip
+ZeldaAlttPSNESRecomp-windows-*.zip
+zelda-v*.zip
 release-stage/
