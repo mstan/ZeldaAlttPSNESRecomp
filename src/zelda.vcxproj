@@ -189,6 +189,7 @@
     <ClCompile Include="..\snesrecomp\runner\src\framedump.c" />
     <ClCompile Include="..\snesrecomp\runner\src\launcher.c" />
     <ClCompile Include="..\snesrecomp\runner\src\crc32.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\sha256.c" />
     <ClCompile Include="..\snesrecomp\runner\src\keybinds.c" />
     <ClCompile Include="..\snesrecomp\runner\src\cpu_state.c" />
     <ClCompile Include="..\snesrecomp\runner\src\cpu_trace.c" />

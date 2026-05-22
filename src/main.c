@@ -591,20 +591,28 @@ int main(int argc, char** argv) {
    * paths below pick up the resolved path without further changes.
    *
    * The launcher auto-strips a 512-byte SMC copier header before hashing,
-   * so headered and unheadered dumps both verify against the same CRC. */
+   * so headered and unheadered dumps both verify against the same hash. */
   static char rom_path_buf[512];
   {
-    /* Canonical "Legend of Zelda, The - A Link to the Past (USA).sfc"
-     * (no-intro): unheadered 1 MiB LoROM, CRC32 = 0x777AAC2F. The launcher
-     * re-prompts on mismatch via the Win32 file picker. */
-    static const uint32_t kZeldaUsaCrc32 = 0x777AAC2Fu;
+    /* Canonical "Legend of Zelda, The - A Link to the Past (USA).sfc":
+     * 1 MiB LoROM. SHA-256 sourced from the snesrev/zelda3 decomp project's
+     * README — same ROM the recompiler targets. The launcher re-prompts
+     * on mismatch via the Win32 file picker. */
+    static const uint8_t kZeldaUsaSha256[32] = {
+      0x66,0x87,0x1d,0x66,0xbe,0x19,0xad,0x2c,
+      0x34,0xc9,0x27,0xd6,0xb1,0x4c,0xd8,0xeb,
+      0x6f,0xc3,0x18,0x19,0x65,0xb6,0xe5,0x17,
+      0xcb,0x36,0x1f,0x73,0x16,0x00,0x9c,0xfb,
+    };
     char *la_argv[2] = {
       (char *)"zelda",
       (char *)((argc >= 1 && argv[0]) ? argv[0] : "")
     };
     int la_argc = (la_argv[1][0] != '\0') ? 2 : 1;
-    if (!snesrecomp_launcher_resolve_rom(la_argc, la_argv, rom_path_buf,
-                                         sizeof(rom_path_buf), kZeldaUsaCrc32)) {
+    extern int snesrecomp_launcher_resolve_rom_sha256(
+        int, char **, char *, size_t, const uint8_t *);
+    if (!snesrecomp_launcher_resolve_rom_sha256(la_argc, la_argv, rom_path_buf,
+                                                sizeof(rom_path_buf), kZeldaUsaSha256)) {
       /* User cancelled the picker or repeatedly chose a non-matching ROM. */
       return 1;
     }
