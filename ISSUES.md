@@ -1,8 +1,32 @@
 # Zelda ALttP Recomp — Known Issues
 
-## ACTIVE: Camera axis-swap on sword-hit against Sprite_4B (Green Knife Guard)
+## RESOLVED: Camera axis-swap on sword-hit against Sprite_4B (Green Knife Guard)
 
-**Status:** Root cause identified; fix in progress.
+**Status:** Fixed in snesrecomp@7ef1f59 (`v2: NLR-detector tolerates paired
+PHA/PLA in setup region`). Resolved 2026-05-21.
+
+**Root cause (confirmed):** `$05:F971` ends with the NLR idiom
+`PLA STA $0D50,X / PLA STA $0D40,X / PLA PLA / RTS` (return-to-grandparent
+via `SKIP_1`), paired with 2 `PHA`s earlier in `$05:F97A`. The v2
+NLR-detector's per-block "setup region has no Push/Pull" check rejected
+this pattern because the two paired `PLA/STA` restores live in the same
+block as the trailing NLR pulls. Without NLR recognition, `F971` popped
+2 bytes from its caller's frame on return — and inside the
+`Module07_Dungeon` `L_87E5..L_8842` sandwich around `Sprite_Main`, those
+caller-frame bytes were the saved BG scroll values, so `L_8842`'s PLAs
+wrote garbage to `$7E:00E0-E9`.
+
+**Fix:** Relaxed the detector — setup region may now contain Push/Pull
+ops; the requirement is `function-wide PLAs - PHAs == trailing pull_count`
+instead. The existing `F94E` case (`PLA PLA RTS` with no preceding PHAs)
+still passes (`0 - 0 = 0`, setup-region check skipped).
+
+**Why only Sprite_4B + sword contact triggered it:** That combination
+uniquely entered the `Sprite_CheckDamageFromLink` chain that called
+`F971` with the broken trailing-PLA pattern. Other damage paths happened
+to avoid this function or balanced via different idioms.
+
+The original analysis below is kept for context.
 
 ### Symptom
 
