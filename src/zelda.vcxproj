@@ -221,10 +221,10 @@
     <ClCompile Include="gen\zelda_1b_v2.c" />
     <ClCompile Include="gen\zelda_1d_v2.c" />
     <ClCompile Include="gen\zelda_1e_v2.c" />
+    <ClCompile Include="gen\zelda_dispatch_v2.c" />
+    <ClCompile Include="gen\unresolved_stubs_v2.c" />
     <!-- Banks $03, $10-$19, $1C, $1F have no decompiled functions in the
          zelda3 source (data / sound / music banks). -->
-    <!-- <ClCompile Include="gen\unresolved_stubs_v2.c" /> — only present
-         if v2_regen emits it (currently doesn't for Zelda's bank 0). -->
     <ClCompile Include="..\snesrecomp\runner\src\debug_server.c" />
     <!-- Oracle-only sources. ExcludedFromBuild in every non-Oracle configuration
          so Release|x64 / Debug|x64 binaries contain zero oracle code. -->
