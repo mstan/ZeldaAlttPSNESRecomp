@@ -94,7 +94,7 @@ regenerated in the same pass.
 
 ---
 
-## OPEN: Overworld BG garble + Start button broken (M/X drift)
+## OPEN: Overworld BG garble + Start menu + item HUD broken (M/X drift)
 
 **Status:** OPEN. Last updated 2026-05-29.
 
@@ -108,7 +108,12 @@ regenerated in the same pass.
    pause menu; instead it appears to warp Link back into the house interior
    (or some incorrect room module), with sprite rendering broken/garbled.
 
-Both are consistent with the existing M/X drift root cause below.
+3. **Item HUD not updating** — after Link receives the Lantern, it does not
+   appear in his item HUD. Previously worked correctly. Consistent with the
+   same M/X drift root cause (wrong-width GFX load corrupting the item slot
+   tile indices written to VRAM).
+
+All three are consistent with the existing M/X drift root cause below.
 **Link's sprite and movement are now fixed** (see RESOLVED section above).
 Link-sprite garble was a downstream symptom of the same drift; it is gone.
 
