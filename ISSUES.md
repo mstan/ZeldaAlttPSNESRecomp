@@ -1,5 +1,180 @@
 # Zelda ALttP Recomp — Known Issues
 
+## RESOLVED: Link movement/collision/animation broken (entry_s_offset bug)
+
+**Status:** RESOLVED 2026-05-29. Link moves correctly, respects collision, and animates.
+Verified post-fix: `$006D` and `$006E` now written every frame, `$0030` nonzero during
+movement, `step` command works without timeout.
+
+**Symptom:** Link's position at `$7E:0020`/`$0022` updates when a D-pad direction is
+held, but:
+- `$7E:006D` (movement-occurred flag) is **never written** — always 0
+- `$7E:006E` (facing direction) is **never written** — always 0
+- `$7E:0072` (animation index) stays 0 — `LinkOam_Main_M1X1` writes it as 0 every frame
+- Link does not respect wall/stair collision
+- Link's sprite is garbled/stuck in the wrong animation state
+
+`$7E:0030` (move magnitude) gets values `0xFE`/`0xFF` during movement (correct velocity
+computed), and position does change (velocity path runs), but the full collision+animation
+path never fires.
+
+**Evidence packet:** `debug_runs/20260529_194524/` — WRAM write traces for all key
+addresses over ~30 movement frames. Key findings from `wram_writes_at`:
+- `$006E`: 0 writes (idle and movement)
+- `$006D`: 0 writes (idle and movement)
+- `$0020`/`$0022`: written by `Link_HandleVelocity_M1X1` → `Link_HandleVelocityAndSandDrag_M1X1` ✓
+- `$0030`: written by `Link_HandleVelocityAndSandDrag_M1X1` with correct velocity ✓
+- `$00F2` (joypad P1): written by `NMI_ReadJoypads_M1X1` (joypad path is live) ✓
+
+**Root cause (confirmed):** `Link_HandleVelocityAndSandDrag_M1X1` (PC `$07:E3E0`) is
+tail-called from `Link_HandleVelocity_M1X1` (PC `$07:E245`), which begins with a
+PHB/PHK/PLB preamble (net `cpu->S -= 1`). `Link_HandleVelocityAndSandDrag_M1X1` ends
+with a matching PLB that pops the PHB byte before its RTL. This leaves `_ret_s`
+(recorded before RTL pops) equal to `_entry_s` of `Link_HandleVelocity_M1X1`, which the
+runtime's `cpu_resolve_ancestor_skip` interprets as a return-to-ancestor and fires an
+NLR.
+
+The NLR propagates back through `Link_HandleVelocity_M1X1` and out of
+`PlayerHandler_00_Ground_3_M1X1`, skipping the `goto L_82C2` that would have reached:
+
+1. **`Link_HandleCardinalCollision_M1X1`** (`$07:B7C7`) — first instruction writes
+   `$006E = 0`; calls `Link_HandleDiagonalKickback_M1X1` which sets `$006D` and calls
+   `TileDetection_Execute_M1X1` (`$07:D9D8`).
+2. **`Link_HandleMovingAnimation_FullLongEntry_M1X1`** — updates animation index and
+   facing direction.
+
+Both are skipped every frame, explaining all observed symptoms simultaneously.
+
+**Fix (pending regen+rebuild):**
+
+*Recompiler change* — new `entry_s_offset` cfg directive. When non-zero, the emitted
+`_entry_s` is `cpu->S + N` instead of `cpu->S`. This lets the RTL host-return check
+(`_hrv && _ret_s == _entry_s`) pass correctly for functions entered with a caller-managed
+stack imbalance.
+
+Files changed:
+- `recomp/bank07.cfg`: `Link_HandleVelocityAndSandDrag` line gets `entry_s_offset:1`
+- `snesrecomp/recompiler/v2/emit_bank.py`: add `entry_s_offset: int = 0` to `BankEntry`
+- `snesrecomp/recompiler/v2/cfg_loader.py`: parse `entry_s_offset:<n>` from func lines
+- `snesrecomp/recompiler/v2/emit_function.py`: emit `_entry_s = (uint16)(cpu->S + Nu)`
+  when offset != 0
+
+After this fix:
+- `_entry_s_SandDrag = cpu->S + 1` at function entry (= `S_jsl - 3`)
+- After PLB epilogue: `_ret_s = S_jsl - 3 = _entry_s_SandDrag`
+- `_hrv && _ret_s == _entry_s` → TRUE → clean host-return → RECOMP_RETURN_NORMAL
+- `PlayerHandler_00_Ground_3_M1X1` reaches `L_82C2` → calls `Link_HandleCardinalCollision_M1X1`
+
+**Regen status:** Full regen running as of this writing (all banks; required because the
+partial `--banks 07` regen interacts with the variant-prune trimmer and drops M0X0/M0X1
+variants for functions immediately after the changed boundary). Dispatch table must be
+regenerated in the same pass.
+
+**Expected stop conditions after rebuild:**
+- `$006E` gets non-zero writes during movement (first write = `Link_HandleCardinalCollision_M1X1` entry)
+- `$006D` gets non-zero writes when moving
+- `TileDetection_Execute_M1X1` at `$07:D9D8` executes
+- Link respects wall/stair collision
+- Link's sprite animation is no longer stuck
+
+**Debug tooling created this session:**
+- `debug_harness.py` — autonomous TCP debug harness (launch, connect, load states,
+  drive controller, capture WRAM timeseries + write traces, screenshot). Run:
+  `python debug_harness.py --phase all`
+- `build_oracle.bat` — convenience wrapper for Oracle|x64 msbuild rebuild
+- **Debug server fixes also applied:**
+  - `cmd_step` held the global mutex during its entire wait loop, deadlocking the main
+    thread after 1 frame (main thread decremented `s_step_remaining` then blocked on the
+    mutex `debug_server_record_frame` needs). Fixed: unlock before wait, lock after.
+  - `Sleep(0)` in the Windows step-wait branch ran 150 000 iterations in <1 ms, always
+    timing out. Fixed: `Sleep(1)` with 5 000-iteration cap (~5 s).
+  - Welcome banner (`{"connected":true,...}`) on TCP accept was consuming the first user
+    command's response slot, shifting all responses by 1. Fixed in harness: banner is
+    drained at connect time before any commands are sent.
+
+---
+
+## OPEN: Overworld BG garble + Start button broken (M/X drift)
+
+**Status:** OPEN. Last updated 2026-05-29.
+
+**Current symptom set (post Link-fix):**
+
+1. **Overworld BG garble** — stepping onto the overworld renders horizontal
+   red/orange stripe garbage across the entire background. HUD items (hearts, rupees)
+   render correctly. Reproduced immediately on walking out of the house.
+
+2. **Start button broken** — pressing Start from the overworld does not open the
+   pause menu; instead it appears to warp Link back into the house interior
+   (or some incorrect room module), with sprite rendering broken/garbled.
+
+Both are consistent with the existing M/X drift root cause below.
+**Link's sprite and movement are now fixed** (see RESOLVED section above).
+Link-sprite garble was a downstream symptom of the same drift; it is gone.
+
+**Note on scope change from previous entry:** the overworld BG garble was previously
+entangled with Link-sprite garble in one issue. Link-sprite is resolved. The two
+remaining symptoms (overworld BG, Start) share the same root cause (M/X drift) and
+are tracked together here.
+
+**Symptom (original):** New game intro renders fine (title, story text, Link asleep
+in bed, Link's HOUSE interior BG). The instant Link MOVES, his sprite broke and the
+OVERWORLD background rendered as garbage stripes.
+**Link-sprite is now fixed** (entry_s_offset:1 cfg hint, 2026-05-29). Overworld BG
+garble and Start-button malfunction remain open per the new symptom set above.
+
+**KNOWN-GOOD REFERENCE (use it, don't guess):** the v0.1.0 build renders all of
+this correctly. Built binary (Oracle|x64, debug server):
+`F:\Projects\snesrecomp\_oracle_zelda\build\bin-x64-Oracle\zelda.exe`
+(pins zelda `fe404eb` + snesrecomp `58e5646`). Both it and the tip are
+DETERMINISTIC recomp builds with the same debug server (port 4378, one at a time).
+DIFF the tip against it through the repro below.
+
+**Repro (exact):** boot zelda.exe → title (~frame 800) → `set_controller Start`
+(PLAYER SELECT; save "1.LINK" exists) → `Start` (loads new-game intro) → tap `A`
+~18× to clear the Agahnim telepathy text until the screen brightens (Link in bed,
+house renders fine) → `set_controller Right` to walk Link out of bed → garble.
+
+**Root cause (CLASS confirmed):** M/X flag DRIFT → wrong-width execution, exposed
+by the MMX-era `bf8a34b` change ("fall-through tail-calls dispatch callee m/x by
+RUNTIME flags, not static"). With that policy, the live `x`/`m` flags at every call
+must match hardware. The live `x` drifts to 0 deep in the move's call chain
+(`pxwatch_get` shows `REP` x=1→0 flips), so a GFX-load runs 16-bit when it should be
+8-bit and mis-indexes → garbage tiles; the documented instance is
+`UploadGraphicsFiles_Layer3` `TAY` at `$00:A9A5` writing `$7E` instead of `$0B` to
+`$7E:008C`. Link's sprite is the SAME root: the LinkOam dispatch is reached at the
+drifted `x=0`. During the move the runtime actively runs `Decompress_M1X1` (overworld
+GFX decompress) repeatedly.
+
+**Dead ends — do NOT redo:**
+- Unresolved-dispatch TRAP COUNT is a RED HERRING. Drove it 141→7 (variant prune)
+  and the garble is UNCHANGED. During the garble all tripwires are CLEAN
+  (`phantom_trap_get`/`unresolved_stub_get`/`offrails_get` = 0); the game is running
+  (frame advancing, frame-level `m=1 x=1`, `cpu->S` clean 0x01FF). It is SILENT
+  wrong-output, not a dispatch trap. Restoring indirect-dispatch auto-recovery is NOT
+  the fix.
+- PHP/PLP-balanced flag-preserving classification is ALREADY implemented (snesrecomp
+  `73e3d26`; see `exit_mx_autoroute.py` header). The stale `zelda_00.c` comment about
+  "PHP/PLP not classified" is OBSOLETE. The residual drift has a subtler cause.
+- Do NOT revert `bf8a34b` (it's the MMX guard). Fix the flags that FEED it.
+- `vram_write_diff` (in-process snes9x oracle) is UNRELIABLE here — recomp/oracle
+  rings hold different frame windows and align by ring-index, so `first_diff_idx` is
+  meaningless. Use the known-good RECOMP build to diff instead.
+
+**Work done this session (2026-05-29):** the variant prune in snesrecomp
+`tools/v2_regen.py` (emit-truth marker + default-(1,1) canonical + NEW reference-taint
+prune for dangling caller clones + dispatch-table-subtract-pruned fix; +14-assert test
+`tests/v2/test_prune_unresolved_indirect_goto.py`) makes ALttP LINK (fixed a real
+`LinkOam_Main_M1X0` LNK2019) and is cross-game-safe (SMW guard passed; MMX guard caught
+a 316-dangling dispatch-table bug now fixed). UNCOMMITTED. It does NOT fix the garble.
+
+**Fix direction / next step:** build a from-boot m/x FIRST-DIVERGENCE trace of the tip
+vs the known-good build (drive both through the repro; diff `trace_get_v2` CPU-block
+rings / `get_v2_cpu` / `read_ram $7E:008C`). The FIRST instruction where the tip's `x`
+differs from the known-good is the fix site (or the routine emitting it). Fix the
+recompiler so its flags match there (preferred, helps all games — then guard SMW/MMX);
+glue-level force in `zelda_00.c` (like the SMW `smw_00.c` fix) is the fallback.
+
 ## RESOLVED: Camera axis-swap on sword-hit against Sprite_4B (Green Knife Guard)
 
 **Status:** Fixed in snesrecomp@7ef1f59 (`v2: NLR-detector tolerates paired
