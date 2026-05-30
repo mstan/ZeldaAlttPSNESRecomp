@@ -96,31 +96,70 @@ regenerated in the same pass.
 
 ## OPEN: Overworld BG garble + Start menu + item HUD broken (M/X drift)
 
-**Status:** OPEN. Last updated 2026-05-29.
+**Status:** OPEN. Root cause traced to `Overworld_LoadOverlays2_M1X1`. Last updated 2026-05-30.
 
 **Current symptom set (post Link-fix):**
 
 1. **Overworld BG garble** — stepping onto the overworld renders horizontal
-   red/orange stripe garbage across the entire background. HUD items (hearts, rupees)
-   render correctly. Reproduced immediately on walking out of the house.
+   red/orange stripe garbage across the entire background.
 
 2. **Start button broken** — pressing Start from the overworld does not open the
-   pause menu; instead it appears to warp Link back into the house interior
-   (or some incorrect room module), with sprite rendering broken/garbled.
+   pause menu correctly.
 
-3. **Item HUD not updating** — after Link receives the Lantern, it does not
-   appear in his item HUD. Previously worked correctly. Consistent with the
-   same M/X drift root cause (wrong-width GFX load corrupting the item slot
-   tile indices written to VRAM).
+3. **Item HUD not updating** — after Link receives the Lantern, it does not appear
+   in the item HUD.
 
-All three are consistent with the existing M/X drift root cause below.
-**Link's sprite and movement are now fixed** (see RESOLVED section above).
-Link-sprite garble was a downstream symptom of the same drift; it is gone.
+**Root cause (traced further, 2026-05-30):**
 
-**Note on scope change from previous entry:** the overworld BG garble was previously
-entangled with Link-sprite garble in one issue. Link-sprite is resolved. The two
-remaining symptoms (overworld BG, Start) share the same root cause (M/X drift) and
-are tracked together here.
+The garble is from **wrong tile data in the DMA source buffer `$7E:C700`**. NMI
+reads `$7E:0219` as the VRAM word destination (→ `$2116`), then DMA-copies from
+`$7E:C700` (source bank $7E, address $C700) to VRAM. The recomp writes the wrong
+pixel bytes, causing the horizontal stripe pattern.
+
+Confirmed: oracle writes `0xFB` to VRAM byte `0x8200` (BG1 tile area), recomp writes
+`0xEF` — same VRAM destination, different data. So the VRAM address is not the problem;
+the SOURCE DATA is wrong.
+
+`$7E:0219` (VRAM word dest = 0x6040): hardcoded by bank $0C init code (`LDA #$6040 /
+STA $0219`) — correct as-is. Both recomp and oracle use this value.
+
+`$7E:C700`: set via DMA (bypasses CPU WRAM trace) early in the game session (frame ~172
+after save state loads). The save states themselves contain the corrupted tile data —
+the corruption was introduced during the ORIGINAL game initialization (intro sequence)
+before any save states were created.
+
+**Save state corruption chain:**
+1. During game intro (before save states existed), some tile decompression function
+   ran with M/X drift (X=0 when X=1 expected)
+2. Wrong-width table lookups produced wrong pixel data in `$C700` area
+3. NMI uploaded that wrong data to VRAM every frame
+4. The saved game states preserved the wrong `$C700` values in WRAM
+
+**pxwatch trips observed:**
+- On overworld (with save state): first X=1→0 in `TileDetect_Movement_X_M1X1` — 
+  collision detection, expected, has matching SEPs. Not the bug.
+- `NMI_PrepareSprites_M1X1` REP #$31 with matching SEP #$10 + SEP #$20 — also expected.
+- **Real bug site:** unknown, in the intro/init sequence. Must trace from FRESH BOOT.
+
+**Key investigation blocker:** `$C700` is written via DMA (not CPU writes), so the
+always-on WRAM trace cannot capture it. The DMA write bypasses `cpu_write8/16` hooks.
+
+**`Overworld_LoadOverlays2_M1X1` note:** `REP #$30` at `$02:AF1E` IS correct per ROM
+bytes (0xC2 0x30). The `$008C = 0x9F` value it writes is the correct value for area 
+0x1B via the dispatch table. NOT the root cause of the garble.
+
+**Next steps:**
+1. Run full fresh boot (title → save file select → intro → overworld) and trace pxwatch
+   during the intro to find the FIRST problematic M/X trip that produces wrong tile data
+2. Add DMA write tracing to `common_rtl.c` / `snes9x_bridge.cpp` to capture $C700 writes
+3. Once the decompressor-with-drift is found, add `exit_mx` cfg hint to fix it
+
+**Decompression functions of interest (bank 00):**
+- `DecompressAnimatedOverworldTiles_M1X1` at `$00:D394` — has PHB/PHK/PLB + PHY preamble
+  then REP #$30, multiple JSR calls with NLR propagation paths. This pattern can cause
+  M/X drift leakage if any callee returns NLR at M0X0 state.
+- `bank_00_D5CE_M0X0` — called from DecompressAnimatedOverworldTiles, likely the inner
+  decompressor loop writing pixel data to WRAM
 
 **Symptom (original):** New game intro renders fine (title, story text, Link asleep
 in bed, Link's HOUSE interior BG). The instant Link MOVES, his sprite broke and the
@@ -128,12 +167,9 @@ OVERWORLD background rendered as garbage stripes.
 **Link-sprite is now fixed** (entry_s_offset:1 cfg hint, 2026-05-29). Overworld BG
 garble and Start-button malfunction remain open per the new symptom set above.
 
-**KNOWN-GOOD REFERENCE (use it, don't guess):** the v0.1.0 build renders all of
-this correctly. Built binary (Oracle|x64, debug server):
-`F:\Projects\snesrecomp\_oracle_zelda\build\bin-x64-Oracle\zelda.exe`
-(pins zelda `fe404eb` + snesrecomp `58e5646`). Both it and the tip are
-DETERMINISTIC recomp builds with the same debug server (port 4378, one at a time).
-DIFF the tip against it through the repro below.
+**Oracle:** the in-process snes9x backend runs alongside the recomp every frame
+and records WRAM/VRAM/insn traces. Use `wram_writes_at`, `get_oracle_vram_trace`,
+and `vram_write_diff` to compare recomp vs snes9x output directly.
 
 **Repro (exact):** boot zelda.exe → title (~frame 800) → `set_controller Start`
 (PLAYER SELECT; save "1.LINK" exists) → `Start` (loads new-game intro) → tap `A`
@@ -162,9 +198,8 @@ GFX decompress) repeatedly.
   `73e3d26`; see `exit_mx_autoroute.py` header). The stale `zelda_00.c` comment about
   "PHP/PLP not classified" is OBSOLETE. The residual drift has a subtler cause.
 - Do NOT revert `bf8a34b` (it's the MMX guard). Fix the flags that FEED it.
-- `vram_write_diff` (in-process snes9x oracle) is UNRELIABLE here — recomp/oracle
-  rings hold different frame windows and align by ring-index, so `first_diff_idx` is
-  meaningless. Use the known-good RECOMP build to diff instead.
+- Do not rely on a pinned external "known-good" build — use the in-process snes9x
+  oracle backend instead (always-on WRAM/VRAM traces, `vram_write_diff`, etc.).
 
 **Work done this session (2026-05-29):** the variant prune in snesrecomp
 `tools/v2_regen.py` (emit-truth marker + default-(1,1) canonical + NEW reference-taint
@@ -173,12 +208,12 @@ prune for dangling caller clones + dispatch-table-subtract-pruned fix; +14-asser
 `LinkOam_Main_M1X0` LNK2019) and is cross-game-safe (SMW guard passed; MMX guard caught
 a 316-dangling dispatch-table bug now fixed). UNCOMMITTED. It does NOT fix the garble.
 
-**Fix direction / next step:** build a from-boot m/x FIRST-DIVERGENCE trace of the tip
-vs the known-good build (drive both through the repro; diff `trace_get_v2` CPU-block
-rings / `get_v2_cpu` / `read_ram $7E:008C`). The FIRST instruction where the tip's `x`
-differs from the known-good is the fix site (or the routine emitting it). Fix the
-recompiler so its flags match there (preferred, helps all games — then guard SMW/MMX);
-glue-level force in `zelda_00.c` (like the SMW `smw_00.c` fix) is the fallback.
+**Fix direction / next step:** find the first M/X divergence using the in-process
+snes9x oracle. Drive the repro, then query `wram_writes_at 8C` on the recomp side
+and compare against oracle WRAM/VRAM traces. The first write where recomp and oracle
+disagree on the value or writer identifies the drifted call site. Fix with an
+`exit_mx` cfg hint on the callee that exits with wrong flags (preferred, general) or
+a glue-level force in `zelda_00.c` as fallback.
 
 ## RESOLVED: Camera axis-swap on sword-hit against Sprite_4B (Green Knife Guard)
 
