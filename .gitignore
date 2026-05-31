@@ -57,6 +57,11 @@ src/gen/
 # Triage scratch
 _triage/
 hw_trace.log
+debug_runs/
+probes/
+build_out*.txt
+build_err*.txt
+gen_backup_*.zip
 
 # Screenshots / scratch BMPs
 *.bmp
