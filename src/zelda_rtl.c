@@ -173,6 +173,7 @@ void ZeldaRunOneFrameOfGame(void) {
     g_snes->inNmi = true;
     /* NMI handler at $00:80C9. zelda3 names it Interrupt_NMI; recompiler
      * emits the body under that name (no `I_NMI` alias). */
+    cpu_push_interrupt_frame(&g_cpu);
     Interrupt_NMI(&g_cpu);
     /* HLE thread-context-switch restore (2026-05-17). Interrupt_NMI's
      * asm ends with a polyhedral-thread context switch (TCS to poly

@@ -39,9 +39,18 @@ void ZeldaRunOneFrameOfGame_Internal(void) {
    * asm at $8051. Stays in WRAM since the recompiled
    * Module_MainRouting reads it. */
   ++g_ram[0x001A];
+  /* The replaced ROM loop used JSR ClearOamBuffer, JSL Module_MainRouting,
+   * then JSR NMI_PrepareSprites. Model those guest return frames at this
+   * explicit HLE boundary so generated RTS/RTL epilogues never pop live
+   * low-WRAM state as return bytes. */
+  uint16 _s_main_pre = g_cpu.S;
+  cpu_push_jsr_return_frame(&g_cpu);
   ClearOamBuffer(&g_cpu);
+  cpu_push_jsl_return_frame(&g_cpu);
   Module_MainRouting(&g_cpu);
+  cpu_push_jsr_return_frame(&g_cpu);
   NMI_PrepareSprites(&g_cpu);
+  g_cpu.S = _s_main_pre;
   /* STZ $12 — clear the vblank-pending flag. */
   g_ram[0x0012] = 0;
   waiting_for_vblank = 0;
