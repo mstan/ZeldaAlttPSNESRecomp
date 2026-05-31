@@ -666,6 +666,9 @@ int main(int argc, char** argv) {
   if (g_config.audio_samples <= 0 || ((g_config.audio_samples & (g_config.audio_samples - 1)) != 0))
     g_config.audio_samples = kDefaultSamples;
 
+  if (g_config.gamepad_deadzone <= 0 || g_config.gamepad_deadzone > 32767)
+    g_config.gamepad_deadzone = 10000;
+
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
   // set up SDL
@@ -1229,7 +1232,7 @@ static void HandleGamepadAxisInput(GamepadInfo *gi, int axis, Sint16 value) {
   if (axis == SDL_CONTROLLER_AXIS_LEFTX || axis == SDL_CONTROLLER_AXIS_LEFTY) {
     *(axis == SDL_CONTROLLER_AXIS_LEFTX ? &gi->last_axis_x : &gi->last_axis_y) = value;
     int buttons = 0;
-    if (gi->last_axis_x * gi->last_axis_x + gi->last_axis_y * gi->last_axis_y >= 10000 * 10000) {
+    if (gi->last_axis_x * gi->last_axis_x + gi->last_axis_y * gi->last_axis_y >= g_config.gamepad_deadzone * g_config.gamepad_deadzone) {
       // in the non deadzone part, divide the circle into eight 45 degree
       // segments rotated by 22.5 degrees that control which direction to move.
       // todo: do this without floats?
@@ -1341,6 +1344,10 @@ static const char kDefaultSmwIniContent[] =
   "# when plugged in. Set to false to force keyboard-only.\n"
   "EnableGamepad1 = true\n"
   "EnableGamepad2 = true\n"
+  "\n"
+  "# Analog stick deadzone (raw axis units, range 1-32767).\n"
+  "# 10000 ~ 30% deflection. Increase if idle stick drifts trigger movement.\n"
+  "GamepadDeadzone = 10000\n"
   "\n"
   "# Default Xbox-layout mapping. Order matches kKeys_Controls:\n"
   "#   Up, Down, Left, Right, Select, Start, A, B, X, Y, L, R\n"

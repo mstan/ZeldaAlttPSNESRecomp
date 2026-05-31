@@ -57,6 +57,7 @@ typedef struct Config {
   const char *shader;
 
   bool enable_gamepad[2];
+  int gamepad_deadzone;
 
   // Which players have keyboard controls
   uint8 has_keyboard_controls;

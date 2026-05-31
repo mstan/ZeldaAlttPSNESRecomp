@@ -302,6 +302,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.enable_gamepad[0]);
     } else if (StringEqualsNoCase(key, "EnableGamepad2")) {
       return ParseBool(value, &g_config.enable_gamepad[1]);
+    } else if (StringEqualsNoCase(key, "GamepadDeadzone")) {
+      g_config.gamepad_deadzone = (int)strtol(value, (char**)NULL, 10);
+      return true;
     } else {
       for (int i = 0; i < countof(kKeyNameId); i++) {
         if (StringEqualsNoCase(key, kKeyNameId[i].name)) {
