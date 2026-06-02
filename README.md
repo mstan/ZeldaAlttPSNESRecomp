@@ -25,9 +25,9 @@ Hand-verified end-to-end through:
 
 - Boot → attract demo → file select → in-game.
 - **Module 09 (Overworld)** reachable and traversable.
-- **Module 07 (Dungeon)** including sword combat against Green Knife
-  Guards — the bug from v0.1.0's release-note investigation
-  (camera axis-swap on sword hit) is fixed.
+- **Module 07 (Dungeon)** including sword combat — the bug from
+  v0.1.0's release-note investigation (camera axis-swap on sword hit)
+  is fixed.
 - Audio (HLE SPC upload of the cartridge's stock sound engine) plays
   through title, gameplay, sword/item SFX, and music transitions.
 
