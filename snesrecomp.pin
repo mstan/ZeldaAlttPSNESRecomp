@@ -3,7 +3,11 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = 95c2f207379d02fe56e3ae7db0388398d82d7324
+sha = 7144d73287631c5df00943c5a17aeaa9b266a641
+# Bumped 2026-06-03: funcs.h emitter now emits the un-prefixed canonical
+# per-frame entry decl `void RunOneFrameOfGame_Internal(void);`. Game side
+# renamed Zelda{Run,RunOneFrameOfGame_Internal} -> RunOneFrameOfGame /
+# RunOneFrameOfGame_Internal to match exactly so the link resolves.
 # Bumped 2026-06-03: lands the in-process snes9x oracle removal + the
 # recomp_post_mortem_dump genericization (debug_server.c now calls that name).
 # Branch: main. Created 2026-06-03 — first pin file for this repo, recording

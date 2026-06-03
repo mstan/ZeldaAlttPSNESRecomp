@@ -13563,7 +13563,7 @@ RecompReturn Sprite_DrawRippleIfInWater_M1X1(CpuState *cpu);
  * referenced by recompiled code via funcs.h.
  */
 void ResetSpritesFunc(int wh);
-void SmwRunOneFrameOfGame_Internal(void);
+void RunOneFrameOfGame_Internal(void);
 
 /* Watchdog hook called at every block label. Implemented in
  * snesrecomp/runner/src/common_cpu_infra.c.

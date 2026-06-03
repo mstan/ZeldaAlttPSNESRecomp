@@ -22,7 +22,7 @@
  * redeclare here. */
 
 /* Host-protocol frame counters, populated by the orchestration in
- * zelda_rtl.c::ZeldaRunOneFrameOfGame. Names are framework-shaped,
+ * zelda_rtl.c::RunOneFrameOfGame. Names are framework-shaped,
  * not game-specific. */
 extern uint16 counter_global_frames;
 

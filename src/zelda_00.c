@@ -18,9 +18,9 @@ uint16 counter_global_frames = 0;
  * The cfg has `exclude_range 8034 8061` so the recompiler doesn't
  * emit the asm spinlock body; the I_RESET function ends just
  * before the spinlock thanks to `end:8034`. Each frame the SDL
- * main loop calls into ZeldaRunOneFrameOfGame which calls this
+ * main loop calls into RunOneFrameOfGame which calls this
  * (after the per-frame I_NMI on non-zero frames). */
-void ZeldaRunOneFrameOfGame_Internal(void) {
+void RunOneFrameOfGame_Internal(void) {
   assert(waiting_for_vblank != 0);
   /* Match the M/X state of the asm splice point at $00:8034. The
    * preceding asm at $00:8027 is `SEP #$30` (m=1, x=1); the spinlock
