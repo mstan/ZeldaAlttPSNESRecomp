@@ -72,7 +72,7 @@ enum {
   kDefaultSamples = 2048,
 };
 
-static const char kWindowTitle[] = "Zelda LttP";
+static const char kWindowTitle[] = "Legend of Zelda: A Link to the Past (Recompiled)";
 static uint32 g_win_flags = SDL_WINDOW_RESIZABLE;
 static SDL_Window *g_window;
 
