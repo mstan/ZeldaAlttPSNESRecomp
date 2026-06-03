@@ -478,7 +478,7 @@ static void crash_handler(int sig) {
   cpu_trace_dump_dbpb("CRASH — DB/PB mutations");
   cpu_trace_dump_recent("CRASH — main trace ring", 256);
   fflush(stderr);
-  smw_post_mortem_dump("signal", NULL);
+  recomp_post_mortem_dump("signal", NULL);
   _exit(128 + sig);
 }
 
@@ -503,13 +503,13 @@ static LONG WINAPI seh_handler(EXCEPTION_POINTERS* info) {
   cpu_trace_dump_dbpb("SEH CRASH — DB/PB mutations");
   cpu_trace_dump_recent("SEH CRASH — main trace ring", 256);
   fflush(stderr);
-  smw_post_mortem_dump("seh", info);
+  recomp_post_mortem_dump("seh", info);
   return EXCEPTION_EXECUTE_HANDLER;
 }
 #endif
 
 static void post_mortem_atexit(void) {
-  smw_post_mortem_dump("atexit", NULL);
+  recomp_post_mortem_dump("atexit", NULL);
 }
 
 #undef main
@@ -554,7 +554,7 @@ int main(int argc, char** argv) {
     argc -= 2, argv += 2;
   } else {
     SwitchDirectory();
-    /* SwitchDirectory walks up 3 levels for an existing smw.ini. If
+    /* SwitchDirectory walks up 3 levels for an existing config.ini. If
      * none found (typical first-launch from a release directory),
      * write a default next to the executable and chdir there. */
     EnsureSmwIniNextToExe(program_path);
@@ -576,13 +576,13 @@ int main(int argc, char** argv) {
   }
   ParseConfigFile(config_file);
   // Apply local overrides if present (gitignored). Lets a developer
-  // mute audio etc. without touching the checked-in smw.ini. Last
+  // mute audio etc. without touching the checked-in config.ini. Last
   // parser to set a key wins, so local overrides take precedence.
   {
-    FILE *f_local = fopen("smw.local.ini", "rb");
+    FILE *f_local = fopen("config.local.ini", "rb");
     if (f_local) {
       fclose(f_local);
-      ParseConfigFile("smw.local.ini");
+      ParseConfigFile("config.local.ini");
     }
   }
 
@@ -895,12 +895,12 @@ error_reading:;
     debug_server_wait_if_paused();
 
     /* Drive the SNES controller bits in g_input_state from keybinds.ini.
-     * smw.ini's [KeyMap] still owns system commands (state save/load,
+     * config.ini's [KeyMap] still owns system commands (state save/load,
      * fullscreen, pause, etc.); the 12 controller buttons per player
      * come from keybinds.ini.
      *
      * Mapping below: keybinds bit layout (see keybinds.h) -> kKeys_Controls
-     * index (smw.ini [Controls] order: Up Down Left Right Select Start
+     * index (config.ini [Controls] order: Up Down Left Right Select Start
      * A B X Y L R). HandleCommand is idempotent for set/clear, so calling
      * it every frame is safe. */
     {
@@ -1168,7 +1168,7 @@ static int RemapSdlButton(int button) {
  * HandleCommand's kKeys_Controls / kKeys_ControlsP2 logic but writes
  * to g_pad_buttons so the per-frame keyboard polling can't clobber
  * gamepad-set bits. Non-controller commands (system shortcuts bound
- * via smw.ini [GamepadMap]) fall through to HandleCommand so things
+ * via config.ini [GamepadMap]) fall through to HandleCommand so things
  * like state save/load on a gamepad button still work. */
 static void SetPadButtonOrFallthrough(uint32 j, bool pressed) {
   static const uint8 kKbdRemap[] = { 4, 5, 6, 7, 2, 3, 8, 0, 9, 1, 10, 11 };
@@ -1256,7 +1256,7 @@ static void HandleGamepadAxisInput(GamepadInfo *gi, int axis, Sint16 value) {
   }
 }
 
-// Go some steps up and find smw.ini
+// Go some steps up and find config.ini
 static void SwitchDirectory(void) {
   char buf[4096];
   if (!getcwd(buf, sizeof(buf) - 32))
@@ -1264,13 +1264,13 @@ static void SwitchDirectory(void) {
   size_t pos = strlen(buf);
 
   for (int step = 0; pos != 0 && step < 3; step++) {
-    memcpy(buf + pos, "/smw.ini", 9);
+    memcpy(buf + pos, "/config.ini", 12);
     FILE *f = fopen(buf, "rb");
     if (f) {
       fclose(f);
       buf[pos] = 0;
       if (step != 0) {
-        printf("Found smw.ini in %s\n", buf);
+        printf("Found config.ini in %s\n", buf);
         int err = chdir(buf);
         (void)err;
       }
@@ -1282,8 +1282,8 @@ static void SwitchDirectory(void) {
   }
 }
 
-/* Default smw.ini content written next to the executable when no
- * smw.ini was discoverable on launch. Mirrors the repo-root smw.ini
+/* Default config.ini content written next to the executable when no
+ * config.ini was discoverable on launch. Mirrors the repo-root config.ini
  * but stripped of dev-only comments; keep them in lock-step when
  * adding new tunables that should be user-discoverable. The
  * [GamepadMap] section gives a plugged-in Xbox controller working
@@ -1355,8 +1355,8 @@ static const char kDefaultSmwIniContent[] =
   "Controls =   DpadUp, DpadDown, DpadLeft, DpadRight, Back, Start, B, A, Y, X, Lb, Rb\n"
   "ControlsP2 = DpadUp, DpadDown, DpadLeft, DpadRight, Back, Start, B, A, Y, X, Lb, Rb\n";
 
-/* Write the default smw.ini next to the executable and chdir there.
- * Called by EnsureSmwIniNextToExe when no smw.ini was found via the
+/* Write the default config.ini next to the executable and chdir there.
+ * Called by EnsureSmwIniNextToExe when no config.ini was found via the
  * SwitchDirectory upward walk. Silent no-op if it can't derive the
  * exe directory from `exe_path`. */
 static void WriteDefaultSmwIni(const char *exe_path) {
@@ -1372,28 +1372,28 @@ static void WriteDefaultSmwIni(const char *exe_path) {
   memcpy(dir, exe_path, dir_len);
   dir[dir_len] = 0;
   char ini_path[1024];
-  snprintf(ini_path, sizeof(ini_path), "%s/smw.ini", dir);
+  snprintf(ini_path, sizeof(ini_path), "%s/config.ini", dir);
   FILE *f = fopen(ini_path, "w");
   if (!f) {
-    fprintf(stderr, "Warning: could not write default smw.ini to %s\n", ini_path);
+    fprintf(stderr, "Warning: could not write default config.ini to %s\n", ini_path);
     return;
   }
   fputs(kDefaultSmwIniContent, f);
   fclose(f);
-  printf("[smw.ini] Generated %s\n", ini_path);
-  /* chdir so ParseConfigFile's relative "smw.ini" lookup finds it. */
+  printf("[config.ini] Generated %s\n", ini_path);
+  /* chdir so ParseConfigFile's relative "config.ini" lookup finds it. */
   if (chdir(dir) != 0) {
     fprintf(stderr, "Warning: could not chdir to %s\n", dir);
   }
 }
 
-/* Ensure smw.ini is reachable from cwd. SwitchDirectory walks up to
+/* Ensure config.ini is reachable from cwd. SwitchDirectory walks up to
  * 3 levels looking for one and chdir's if it finds it; if it didn't,
- * cwd has no smw.ini and ParseConfigFile would warn. Write a default
+ * cwd has no config.ini and ParseConfigFile would warn. Write a default
  * next to the executable so first-launch from a clean release directory
  * always has a working config. */
 static void EnsureSmwIniNextToExe(const char *exe_path) {
-  FILE *f = fopen("smw.ini", "rb");
+  FILE *f = fopen("config.ini", "rb");
   if (f) {
     fclose(f);
     return;
