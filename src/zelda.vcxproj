@@ -221,6 +221,7 @@
     <ClCompile Include="..\snesrecomp\runner\src\cpu_trace.c">
       <ExcludedFromBuild Condition="'$(Configuration)'=='Production'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="..\snesrecomp\runner\src\audio_trace.c" />
     <ClCompile Include="config.c" />
     <ClCompile Include="glsl_shader.c" />
     <ClCompile Include="main.c" />
