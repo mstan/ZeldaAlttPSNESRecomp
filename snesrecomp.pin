@@ -3,7 +3,28 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = 2b135e8f5f6acb7ec345d81ba8d0049043d5ecf4
+sha = bf64f0d8983274addaac1f6883a214f6610c157c
+# 2026-06-11 bump (2b135e8 -> bf64f0d): pulls two runner-only change
+# sets, no regen required (src/gen untouched):
+#  - APU port-write scheduler (8ffc797 + bf64f0d): CPU writes to
+#    $2140-43 are scheduled in APU-sample time (write-clock targets,
+#    queue drained in apu_cycle) instead of mutating inPorts at wall
+#    time. Fixes the class where the game's NMI-rate command writes
+#    beat against the audio-callback-rate SPC bursts and the engine
+#    never polls while a command is live — on SMW this silently
+#    dropped ~20-50% of SFX in seconds-long alternating runs (user-
+#    verified fixed). ALttP's N-SPC engine commands ride the same
+#    path. Always-on CPU<->SPC port-traffic rings land with it
+#    (audio_events filter=2; per-port cpu_port_overwrites counters).
+#  - widescreen runner support (2b6b5fc..cbf7fa7): always-on OAM
+#    write/render-read rings + sprite-x gate widening + opt-in BG3 HUD
+#    split. All runtime-gated, inert unless the game opts in (ALttP
+#    main does not).
+# NOTE for the next REGEN (not needed for this bump): the v2 emitter
+# now names outputs src/gen/bank*_v2.c + dispatch_v2.c (game-agnostic),
+# and v2_regen hard-fails on stub-lint markers (pre-existing loud-
+# trapped debt counts). Expect to rename vcxproj gen references and
+# triage the lint when ALttP next regenerates.
 # 2026-06-10 bump (7144d73 -> 2b135e8): pulls three runner-only change
 # sets, no regen required (src/gen untouched):
 #  - exe-dir anchoring (2b135e8): snesrecomp_anchor_to_exe_dir()/
