@@ -33,6 +33,7 @@
 #include "launcher.h"
 #include "keybinds.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, kWsExtraMax, RtlWidescreenPresent
+#include "snes/color_lut.h"  // opt-in present-time CRT color LUT (SNESRECOMP_SCREEN)
 
 typedef struct GamepadInfo {
   uint32 modifiers;
@@ -325,6 +326,15 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   }
   g_rtl_game_info->draw_ppu_frame();
   RtlWidescreenPresent(pixel_buffer, pitch, g_my_pixels, g_snes_width, g_snes_height);
+  // Present-time color grading (opt-in, SNESRECOMP_SCREEN=crt|trinitron; default
+  // raw = no-op). Applied to the present copy only, row by row so the texture
+  // pitch is honored. The raw g_my_pixels (frame-hashed oracle) is never touched.
+  if (snes_color_lut_active()) {
+    for (int y = 0; y < g_snes_height; y++) {
+      uint32_t *row = (uint32_t *)(pixel_buffer + (size_t)y * pitch);
+      snes_color_lut_map(row, row, (size_t)g_snes_width);
+    }
+  }
 }
 
 static void DrawPpuFrameWithPerf(void) {
@@ -803,6 +813,9 @@ error_reading:;
 
   if (!g_renderer_funcs.Initialize(window))
     return 1;
+
+  // Build the present-time color LUT from SNESRECOMP_SCREEN (default raw = off).
+  snes_color_lut_setup();
 
   g_audio_mutex = SDL_CreateMutex();
   if (!g_audio_mutex) Die("No mutex");
