@@ -59,6 +59,12 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs);
 
 bool g_new_ppu = true;
 
+// Widescreen master switch — storage lives per-game (declared extern in the
+// runner's widescreen.h). g_ws_extra = extra columns per side (0 = off);
+// g_ws_active = (g_ws_extra > 0). Set once from config in the setup path below.
+bool g_ws_active = false;
+int g_ws_extra = 0;
+
 struct SpcPlayer *g_spc_player;
 
 // Sized for the widescreen capacity (256 + 2*kPpuExtraLeftRight per row). With
