@@ -3,7 +3,16 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = 2abbadc12c85d6334e874af842acc19b85d1c273
+sha = f63de713d9cf54a789ab8da30298fad2ef9c645b
+# 2026-06-12 bump (2abbadc -> f63de71): pulls the opt-in verified-enhancement
+# shadow runner (feat/shadow-enhancements, merge c83054a): an S-DSP cubic-BRR
+# audio shadow (SNESRECOMP_AUDIO_SHADOW) and a present-time CRT/colorimetric
+# screen LUT (SNESRECOMP_SCREEN=crt|trinitron). Both default OFF and
+# byte-identical when off — the raw canon stays the authoritative output and
+# verify oracle; the audio shadow reverts loud (logs DEGRADED) on divergence.
+# The color LUT's present hook is wired game-side in src/main.c (graded copy
+# only; the frame-hashed g_my_pixels is never touched). No regen (src/gen
+# untouched).
 # 2026-06-12 bump (c17bef7 -> 2abbadc): pulls the widescreen
 # runner capability — asymmetric PpuSetExtraSideSpace + extraBottomCur and the
 # shared widescreen.{c,h} asset (RtlWidescreenPresent + kWsExtraMax + the
