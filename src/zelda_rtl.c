@@ -157,6 +157,27 @@ void ZeldaConfigurePpuSideSpace(void) {
   }
 
   PpuSetExtraSideSpace(g_ppu, extra_left, extra_right, extra_bottom);
+
+  // --- Tier D: widescreen HUD split (self-contained; revert this block to ----
+  // pluck it out). The BG3 status strip is 256-wide tilemap content that
+  // otherwise floats centered in the wide frame. Re-anchor its outer groups to
+  // the screen edges: left group = magic meter (tiles 2-4) + Y-item box (5-7)
+  // -> left edge; center = rupee/bomb/arrow/key counts (8-19) -> stay centered;
+  // right group = hearts + LIFE (20+) -> right edge. The magic-meter column is
+  // the tallest element and (with BG3's gameplay scroll) its lower rows reach
+  // ~scanline 63, so the split band is 64px tall to keep the whole bar in one
+  // piece rather than vertically clipping it. Only during
+  // actual gameplay (overworld 9 / dungeon 7), where BG3 shows just the status
+  // strip; disabled in menus / the full inventory panel (main_module 14) so
+  // those render normally. The PPU primitive also self-disables on any frame
+  // BG3 carries a real window (e.g. transition irises). Entirely BG3 tiles —
+  // no OAM elements in the bar, so nothing is left behind. (snesrev/zelda3 +
+  // xander-haj/Z3R HUD-rearrange concept; see IMPROVEMENTS.md.)
+  if (main_module == 7 || main_module == 9)
+    PpuSetWidescreenHudSplit(g_ppu, 64, 64, 160);
+  else
+    PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0);
+  // --- end Tier D HUD split -----------------------------------------------
 }
 
 void ZeldaDrawPpuFrame(void) {
