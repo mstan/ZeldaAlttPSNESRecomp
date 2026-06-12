@@ -211,6 +211,7 @@
     <ClCompile Include="..\third_party\gl_core\gl_core_3_1.c" />
     <ClCompile Include="..\snesrecomp\runner\src\common_cpu_infra.c" />
     <ClCompile Include="..\snesrecomp\runner\src\common_rtl.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\widescreen.c" />
     <ClCompile Include="..\snesrecomp\runner\src\recomp_hw.c" />
     <ClCompile Include="..\snesrecomp\runner\src\framedump.c" />
     <ClCompile Include="..\snesrecomp\runner\src\launcher.c" />
