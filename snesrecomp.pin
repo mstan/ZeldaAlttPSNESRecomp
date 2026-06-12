@@ -3,7 +3,12 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = c17bef708054758030682930de03ef65e7a0b0dd
+sha = 2abbadc12c85d6334e874af842acc19b85d1c273
+# 2026-06-12 bump (c17bef7 -> 2abbadc): pulls the widescreen
+# runner capability — asymmetric PpuSetExtraSideSpace + extraBottomCur and the
+# shared widescreen.{c,h} asset (RtlWidescreenPresent + kWsExtraMax + the
+# g_ws_active/g_ws_extra extern contract). Inert by default; this game opts in
+# via the Widescreen config. No regen (src/gen untouched).
 # 2026-06-11 bump (bf64f0d -> c17bef7): docs-only delta
 # (ISSUES.md turbo music-drop note). No code, no regen, no rebuild.
 # Unifies SMW/MMX/ALttP on the runner main tip ahead of the Zelda
