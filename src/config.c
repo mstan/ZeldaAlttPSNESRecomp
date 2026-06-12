@@ -4,6 +4,7 @@
 #include <string.h>
 #include <SDL.h>
 #include "util.h"
+#include "widescreen.h"  // kWsExtraMax
 
 enum {
   kKeyMod_ScanCode = 0x200,
@@ -349,6 +350,13 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.linear_filtering);
     } else if (StringEqualsNoCase(key, "NoSpriteLimits")) {
       return ParseBool(value, &g_config.no_sprite_limits);
+    } else if (StringEqualsNoCase(key, "Widescreen")) {
+      // Extra columns per side. Clamp to the OAM 9-bit representational max.
+      long v = strtol(value, (char**)NULL, 10);
+      if (v < 0) v = 0;
+      if (v > kWsExtraMax) v = kWsExtraMax;
+      g_config.widescreen = (uint8)v;
+      return true;
     } else if (StringEqualsNoCase(key, "Shader")) {
       g_config.shader = *value ? value : NULL;
       return true;

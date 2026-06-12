@@ -50,6 +50,10 @@ typedef struct Config {
   bool autosave;
   bool extend_y;
   bool no_sprite_limits;
+  // Widescreen: extra columns rendered per side (0 = authentic 256-wide, off).
+  // Internal width becomes 256 + 2*widescreen; clamped to kWsExtraMax (95).
+  // ~71 ≈ 16:9 at 224 lines. Opt-in enhancement, default off.
+  uint8 widescreen;
   bool display_perf_title;
   bool disable_frame_delay;
 

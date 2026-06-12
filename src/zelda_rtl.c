@@ -6,6 +6,7 @@
 #include "funcs.h"
 #include "debug_server.h"
 #include "cpu_trace.h"
+#include "widescreen.h"  // g_ws_extra, PpuSetExtraSideSpace via snes/ppu.h
 
 /* HLE the polyhedral coroutine that the SNES runs on a separate stack
  * (NMI tail context-switches into it; it loops at $09:F81D, runs one
@@ -84,6 +85,99 @@ static void ZeldaRestoreMainCpuAbi(void) {
   g_cpu.D  = 0x0000;
   g_cpu.DB = 0x00;
   g_cpu.PB = 0x00;
+}
+
+// Read-only accessors over the recompiled ROM's WRAM image. Offsets are the
+// US-ROM WRAM addresses documented by snesrev/zelda3 (src/variables.h); the
+// recompiled game maintains the same variables at the same addresses (banks
+// $00-$3F mirror WRAM $0000-$1FFF, see common_rtl.c). g_ram is the 128KB WRAM.
+extern uint8 g_ram[];
+#define ZW8(off)  ((int)g_ram[(off)])
+#define ZW16(off) ((int)(g_ram[(off)] | (g_ram[(off) + 1] << 8)))
+
+static int ZwMax0(int v) { return v > 0 ? v : 0; }
+
+void ZeldaConfigurePpuSideSpace(void) {
+  // Reimplementation of zelda3's ConfigurePpuSideSpace (snesrev/zelda3, MIT)
+  // over the recomp's live WRAM. Derives the per-side visible margin from the
+  // current scroll position and room/overworld bounds, clamped so backgrounds
+  // never reveal past the real room edge; PpuSetExtraSideSpace further clamps
+  // each side to the configured framebuffer capacity (g_ws_extra). On screens
+  // not handled here the margin stays 0 => centered pillarbox.
+  //
+  // Re-establish the centering budget every frame (ppu_reset zeroes it on soft
+  // reset / load-state) and start the per-side margins at 0 (pillarbox).
+  PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
+
+  int extra_left = 0, extra_right = 0, extra_bottom = 0;
+
+  int main_module = ZW8(0x10);          // main_module_index   ($7E:0010)
+  int submodule   = ZW8(0x11);          // submodule_index     ($7E:0011)
+  int mod = main_module;
+  if (mod == 14)                        // in a menu: use the module it overlays
+    mod = ZW8(0x10C);                   // saved_module_for_menu ($7E:010C)
+
+  int bg2hofs = ZW16(0xE2);             // BG2HOFS_copy2 (horiz scroll, $7E:00E2)
+  int bg2vofs = ZW16(0xE8);             // BG2VOFS_copy2 (vert scroll,  $7E:00E8)
+
+  if (mod == 9) {
+    // Overworld. ow_scroll_vars0 @ $7E:0600 = uint16 {ystart,yend,xstart,xend}.
+    if (main_module == 14 && submodule == 7 && ZW8(0x200) >= 4) {
+      // World map (overworld_map_state >= 4): full margin, no bounds to clamp.
+      extra_left = extra_right = kPpuExtraLeftRight;
+      extra_bottom = 16;
+    } else {
+      int ow_yend   = ZW16(0x602);
+      int ow_xstart = ZW16(0x604);
+      int ow_xend   = ZW16(0x606);
+      extra_left   = bg2hofs - ow_xstart;
+      extra_right  = ow_xend - bg2hofs;
+      extra_bottom = ow_yend - bg2vofs;
+    }
+  } else if (mod == 7) {
+    // Dungeon. room_bounds_x @ $7E:0608, room_bounds_y @ $7E:0600 (uint16 v[4]).
+    // Skip the horizontal widen while the dark-room lantern light cone is up
+    // (its mask is authored for the 256-wide view only).
+    int dark_lantern = ZW8(0x458);      // hdr_dungeon_dark_with_lantern
+    int ts_copy      = ZW8(0x1D);       // TS_copy
+    if (!(dark_lantern && ts_copy != 0)) {
+      int qm = ZW8(0xA6) >> 1;          // quadrant_fullsize_x >> 1  (0 or 1)
+      int bx_lo = ZW16(0x608 + qm * 2);         // room_bounds_x.v[qm]
+      int bx_hi = ZW16(0x608 + (qm + 2) * 2);   // room_bounds_x.v[qm+2]
+      extra_left  = ZwMax0(bg2hofs - bx_lo);
+      extra_right = ZwMax0(bx_hi - bg2hofs);
+    }
+    int qy = ZW8(0xA7) >> 1;            // quadrant_fullsize_y >> 1
+    int by_hi = ZW16(0x600 + (qy + 2) * 2);     // room_bounds_y.v[qy+2]
+    extra_bottom = ZwMax0(by_hi - bg2vofs);
+  } else if (mod == 20 || mod == 0 || mod == 1) {
+    // Attract/intro/title scenes that pan a full scene: full margin.
+    extra_left = extra_right = kPpuExtraLeftRight;
+    extra_bottom = 16;
+  }
+
+  PpuSetExtraSideSpace(g_ppu, extra_left, extra_right, extra_bottom);
+
+  // --- Tier D: widescreen HUD split (self-contained; revert this block to ----
+  // pluck it out). The BG3 status strip is 256-wide tilemap content that
+  // otherwise floats centered in the wide frame. Re-anchor its outer groups to
+  // the screen edges: left group = magic meter (tiles 2-4) + Y-item box (5-7)
+  // -> left edge; center = rupee/bomb/arrow/key counts (8-19) -> stay centered;
+  // right group = hearts + LIFE (20+) -> right edge. The magic-meter column is
+  // the tallest element and (with BG3's gameplay scroll) its lower rows reach
+  // ~scanline 63, so the split band is 64px tall to keep the whole bar in one
+  // piece rather than vertically clipping it. Only during
+  // actual gameplay (overworld 9 / dungeon 7), where BG3 shows just the status
+  // strip; disabled in menus / the full inventory panel (main_module 14) so
+  // those render normally. The PPU primitive also self-disables on any frame
+  // BG3 carries a real window (e.g. transition irises). Entirely BG3 tiles —
+  // no OAM elements in the bar, so nothing is left behind. (snesrev/zelda3 +
+  // xander-haj/Z3R HUD-rearrange concept; see IMPROVEMENTS.md.)
+  if (main_module == 7 || main_module == 9)
+    PpuSetWidescreenHudSplit(g_ppu, 64, 64, 160);
+  else
+    PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0);
+  // --- end Tier D HUD split -----------------------------------------------
 }
 
 void ZeldaDrawPpuFrame(void) {

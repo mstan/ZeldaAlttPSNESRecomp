@@ -32,6 +32,7 @@
 
 #include "launcher.h"
 #include "keybinds.h"
+#include "widescreen.h"  // g_ws_active, g_ws_extra, kWsExtraMax, RtlWidescreenPresent
 
 typedef struct GamepadInfo {
   uint32 modifiers;
@@ -58,9 +59,18 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs);
 
 bool g_new_ppu = true;
 
+// Widescreen master switch — storage lives per-game (declared extern in the
+// runner's widescreen.h). g_ws_extra = extra columns per side (0 = off);
+// g_ws_active = (g_ws_extra > 0). Set once from config in the setup path below.
+bool g_ws_active = false;
+int g_ws_extra = 0;
+
 struct SpcPlayer *g_spc_player;
 
-static uint8_t g_my_pixels[256 * 4 * 240];
+// Sized for the widescreen capacity (256 + 2*kPpuExtraLeftRight per row). With
+// widescreen off (g_ws_extra == 0) the PPU only writes the leading 256 columns,
+// so this is authentic-identical; the extra capacity is just unused tail.
+static uint8_t g_my_pixels[kPpuBufWidth * 4 * 240];
 
 
 enum {
@@ -297,9 +307,24 @@ static SDL_HitTestResult HitTestCallback(SDL_Window *win, const SDL_Point *pt, v
 }
 
 void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
+  // Widescreen presentation (opt-in). With g_ws_active false, g_snes_width is
+  // 256 and this reduces to the authentic 256-wide copy — byte-identical to the
+  // faithful build. Re-applied every frame because ppu_reset (soft reset /
+  // load-state) zeroes the PPU's margin fields.
+  if (g_ws_active) {
+    // The line renderer only writes the [budget-extraLeftCur ..] span of each
+    // output row (ppu.c: dst += extraLeftRight - extraLeftCur), leaving the
+    // unfilled-budget margin untouched whenever the visible margin is narrower
+    // than the framebuffer capacity. Clear the whole buffer first so those
+    // columns pillarbox to black instead of showing last frame's pixels.
+    memset(g_my_pixels, 0, (size_t)g_snes_width * 4 * (size_t)g_snes_height);
+    // Game policy (read-only): derive the per-side visible margin from live
+    // WRAM (room / scroll bounds), clamped to the current room so no BG past
+    // the real edge is ever shown. Off-policy screens collapse to pillarbox.
+    ZeldaConfigurePpuSideSpace();
+  }
   g_rtl_game_info->draw_ppu_frame();
-  for (size_t y = 0, y_end = g_snes_height; y < y_end; y++)
-    memcpy((uint8 *)pixel_buffer + y * pitch, g_my_pixels + y * 256 * 4, 256 * 4);
+  RtlWidescreenPresent(pixel_buffer, pitch, g_my_pixels, g_snes_width, g_snes_height);
 }
 
 static void DrawPpuFrameWithPerf(void) {
@@ -660,7 +685,13 @@ int main(int argc, char** argv) {
   }
 
   g_gamepad[0].joystick_id = g_gamepad[1].joystick_id = -1;
-  g_snes_width = 256;
+  // Widescreen capacity from config (extra columns per side; 0 = authentic).
+  // g_ws_extra/g_ws_active live in the shared runner asset (widescreen.c) so
+  // the PPU, the present helper, and the injected game-logic snippets all read
+  // one canonical master switch. Default off => byte-identical faithful build.
+  g_ws_extra = IntMin((int)g_config.widescreen, kWsExtraMax);
+  g_ws_active = (g_ws_extra > 0);
+  g_snes_width = 256 + 2 * g_ws_extra;
   g_snes_height = 224;// (g_config.extend_y ? 240 : 224);
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
     g_config.extend_y * kPpuRenderFlags_Height240 |
@@ -803,7 +834,9 @@ error_reading:;
     g_audiobuffer = (uint8 *)calloc(g_frames_per_block * have.channels * sizeof(int16), 1);
   }
 
-  PpuBeginDrawing(g_ppu, g_my_pixels, 256 * 4, 0);
+  // Pitch tracks the widescreen capacity (g_snes_width == 256 when off, so this
+  // is the authentic 256*4 stride unless widescreen is active).
+  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4, 0);
 
   MkDir("saves");
     
