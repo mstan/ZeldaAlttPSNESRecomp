@@ -3,7 +3,12 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = f63de713d9cf54a789ab8da30298fad2ef9c645b
+sha = 26063a0008bc0fe3699de243743054a79f8c636d
+# 2026-06-13 bump (f63de71 -> 26063a0): reconcile Zelda onto runner main.
+# Pulls the ppu widescreen BG3 widen, MSU-1 (msu1.c, default-OFF; already in
+# zelda.vcxproj), the permissive multi-hash ROM resolver, ASCII-only launcher
+# warnings, and the MSVC build fix for msu1.c's dir-scan (FindFirstFile).
+# Runner-only; src/gen untouched, no regen. Default-OFF features byte-identical.
 # 2026-06-12 bump (2abbadc -> f63de71): pulls the opt-in verified-enhancement
 # shadow runner (feat/shadow-enhancements, merge c83054a): an S-DSP cubic-BRR
 # audio shadow (SNESRECOMP_AUDIO_SHADOW) and a present-time CRT/colorimetric
