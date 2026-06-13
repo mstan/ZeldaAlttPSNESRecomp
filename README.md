@@ -125,6 +125,39 @@ section.
    ```
 3. Rebuild as above.
 
+## MSU-1 audio (optional, this branch)
+
+This `feat/msu-1` branch builds an **MSU-1 variant**: CD-quality streaming
+music in place of the SPC soundtrack, via the runner's MSU-1 support. It
+is a separate build from the standard one because it must be recompiled
+from an **MSU-1-patched ROM** (the patch injects the audio driver in
+bank `$22`, which `recomp/bank22.cfg` teaches the recompiler to emit).
+
+**Build it:**
+
+1. Patch a US 1.0 ROM (md5 `608c22b8…`) with qwertymodo's
+   [`alttp_msu.ips`](https://github.com/qwertymodo/MSU1-Zelda) → an
+   expanded 1.5 MB `zelda.sfc`.
+2. Regenerate from the *patched* ROM (the `recomp/bank22.cfg` on this
+   branch emits the driver):
+   ```bash
+   python ../snesrecomp/tools/v2_regen.py --rom zelda.sfc --cfg-dir recomp --out-dir src/gen --prefix zelda
+   python ../snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp --out recomp/funcs.h
+   ```
+3. Build as usual. (`src/main.c`'s ROM hash on this branch is the
+   *patched* image, so the launcher accepts it.)
+
+**Run it with a music pack** — point `SNESRECOMP_MSU1` at the pack:
+
+```sh
+# A folder: the pack base is auto-detected from its <name>-<N>.pcm files
+SNESRECOMP_MSU1=/path/to/alttp_msu_pack  zelda.exe zelda.sfc
+```
+
+Without a pack (or env unset) it plays the normal SPC music — the driver
+detects no MSU-1 and falls back. SFX always stay on the SPC. Packs are
+the standard `<name>-<N>.pcm` set (44.1 kHz stereo); you supply your own.
+
 ## Repo layout
 
 | Path | Purpose |

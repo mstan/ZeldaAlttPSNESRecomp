@@ -15,7 +15,7 @@
 
 #include "cpu_state.h"
 
-/* 2708 functions across all banks (5 decls each). */
+/* 2723 functions across all banks (5 decls each). */
 
 void I_RESET(CpuState *cpu);  /* $00:8000 alias */
 RecompReturn I_RESET_M0X0(CpuState *cpu);
@@ -13557,6 +13557,81 @@ RecompReturn Sprite_DrawRippleIfInWater_M0X0(CpuState *cpu);
 RecompReturn Sprite_DrawRippleIfInWater_M0X1(CpuState *cpu);
 RecompReturn Sprite_DrawRippleIfInWater_M1X0(CpuState *cpu);
 RecompReturn Sprite_DrawRippleIfInWater_M1X1(CpuState *cpu);
+void MsuSetLoop(CpuState *cpu);  /* $22:E880 alias */
+RecompReturn MsuSetLoop_M0X0(CpuState *cpu);
+RecompReturn MsuSetLoop_M0X1(CpuState *cpu);
+RecompReturn MsuSetLoop_M1X0(CpuState *cpu);
+RecompReturn MsuSetLoop_M1X1(CpuState *cpu);
+void MsuMain(CpuState *cpu);  /* $22:E900 alias */
+RecompReturn MsuMain_M0X0(CpuState *cpu);
+RecompReturn MsuMain_M0X1(CpuState *cpu);
+RecompReturn MsuMain_M1X0(CpuState *cpu);
+RecompReturn MsuMain_M1X1(CpuState *cpu);
+void MsuLoad(CpuState *cpu);  /* $22:E910 alias */
+RecompReturn MsuLoad_M0X0(CpuState *cpu);
+RecompReturn MsuLoad_M0X1(CpuState *cpu);
+RecompReturn MsuLoad_M1X0(CpuState *cpu);
+RecompReturn MsuLoad_M1X1(CpuState *cpu);
+void MsuCheck(CpuState *cpu);  /* $22:E950 alias */
+RecompReturn MsuCheck_M0X0(CpuState *cpu);
+RecompReturn MsuCheck_M0X1(CpuState *cpu);
+RecompReturn MsuCheck_M1X0(CpuState *cpu);
+RecompReturn MsuCheck_M1X1(CpuState *cpu);
+void MsuSpcPlay(CpuState *cpu);  /* $22:E970 alias */
+RecompReturn MsuSpcPlay_M0X0(CpuState *cpu);
+RecompReturn MsuSpcPlay_M0X1(CpuState *cpu);
+RecompReturn MsuSpcPlay_M1X0(CpuState *cpu);
+RecompReturn MsuSpcPlay_M1X1(CpuState *cpu);
+void MsuTrackSelect(CpuState *cpu);  /* $22:E990 alias */
+RecompReturn MsuTrackSelect_M0X0(CpuState *cpu);
+RecompReturn MsuTrackSelect_M0X1(CpuState *cpu);
+RecompReturn MsuTrackSelect_M1X0(CpuState *cpu);
+RecompReturn MsuTrackSelect_M1X1(CpuState *cpu);
+void MsuFadeOut(CpuState *cpu);  /* $22:E9F0 alias */
+RecompReturn MsuFadeOut_M0X0(CpuState *cpu);
+RecompReturn MsuFadeOut_M0X1(CpuState *cpu);
+RecompReturn MsuFadeOut_M1X0(CpuState *cpu);
+RecompReturn MsuFadeOut_M1X1(CpuState *cpu);
+void MsuMapOpen(CpuState *cpu);  /* $22:EA20 alias */
+RecompReturn MsuMapOpen_M0X0(CpuState *cpu);
+RecompReturn MsuMapOpen_M0X1(CpuState *cpu);
+RecompReturn MsuMapOpen_M1X0(CpuState *cpu);
+RecompReturn MsuMapOpen_M1X1(CpuState *cpu);
+void MsuFullVolume(CpuState *cpu);  /* $22:EA50 alias */
+RecompReturn MsuFullVolume_M0X0(CpuState *cpu);
+RecompReturn MsuFullVolume_M0X1(CpuState *cpu);
+RecompReturn MsuFullVolume_M1X0(CpuState *cpu);
+RecompReturn MsuFullVolume_M1X1(CpuState *cpu);
+void MsuEnterHouse(CpuState *cpu);  /* $22:EA80 alias */
+RecompReturn MsuEnterHouse_M0X0(CpuState *cpu);
+RecompReturn MsuEnterHouse_M0X1(CpuState *cpu);
+RecompReturn MsuEnterHouse_M1X0(CpuState *cpu);
+RecompReturn MsuEnterHouse_M1X1(CpuState *cpu);
+void MsuIngameChange(CpuState *cpu);  /* $22:EB00 alias */
+RecompReturn MsuIngameChange_M0X0(CpuState *cpu);
+RecompReturn MsuIngameChange_M0X1(CpuState *cpu);
+RecompReturn MsuIngameChange_M1X0(CpuState *cpu);
+RecompReturn MsuIngameChange_M1X1(CpuState *cpu);
+void MsuGreatFairy(CpuState *cpu);  /* $22:EC80 alias */
+RecompReturn MsuGreatFairy_M0X0(CpuState *cpu);
+RecompReturn MsuGreatFairy_M0X1(CpuState *cpu);
+RecompReturn MsuGreatFairy_M1X0(CpuState *cpu);
+RecompReturn MsuGreatFairy_M1X1(CpuState *cpu);
+void MsuStore0130(CpuState *cpu);  /* $22:EDD0 alias */
+RecompReturn MsuStore0130_M0X0(CpuState *cpu);
+RecompReturn MsuStore0130_M0X1(CpuState *cpu);
+RecompReturn MsuStore0130_M1X0(CpuState *cpu);
+RecompReturn MsuStore0130_M1X1(CpuState *cpu);
+void MsuBossVictory(CpuState *cpu);  /* $22:EDD7 alias */
+RecompReturn MsuBossVictory_M0X0(CpuState *cpu);
+RecompReturn MsuBossVictory_M0X1(CpuState *cpu);
+RecompReturn MsuBossVictory_M1X0(CpuState *cpu);
+RecompReturn MsuBossVictory_M1X1(CpuState *cpu);
+void MsuPlay(CpuState *cpu);  /* $22:EE30 alias */
+RecompReturn MsuPlay_M0X0(CpuState *cpu);
+RecompReturn MsuPlay_M0X1(CpuState *cpu);
+RecompReturn MsuPlay_M1X0(CpuState *cpu);
+RecompReturn MsuPlay_M1X1(CpuState *cpu);
 
 /* Hand-written non-recompiled bodies still declared here.
  * These are not produced by the v2 emit pipeline but are
