@@ -59,8 +59,12 @@ if [ -f "$MSU_IPS" ]; then
 fi
 
 step "Regenerating banks"
-# Emits bankXX_v2.c / dispatch_v2.c (game-agnostic). The CMake build globs
-# src/gen/*.c; the Windows MSBuild project lists them by name.
+# Emits bankXX_v2.c / dispatch_v2.c (game-agnostic). Both the CMake build and
+# the MSBuild project (src/zelda.vcxproj) now glob src/gen/*.c. Drop any old
+# zelda_NN_v2.c / zelda_dispatch_v2.c from the previous naming scheme first,
+# so the glob doesn't compile both an orphan and its bankNN replacement
+# (duplicate symbols at link).
+rm -f src/gen/zelda_*_v2.c
 "$PYTHON" snesrecomp/tools/v2_regen.py --rom "$GEN_ROM" \
     --cfg-dir recomp --out-dir src/gen --prefix zelda
 
