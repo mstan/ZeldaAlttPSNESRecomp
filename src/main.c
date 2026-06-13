@@ -649,27 +649,35 @@ int main(int argc, char** argv) {
    * so headered and unheadered dumps both verify against the same hash. */
   static char rom_path_buf[512];
   {
-    /* feat/msu-1: this build is recompiled from the MSU-1-PATCHED ROM
-     * (qwertymodo alttp_msu.ips applied to the US 1 MiB ROM, expanded to
-     * 1.5 MiB). SHA-256 below is the PATCHED image, so the launcher
-     * accepts the patched .sfc and re-prompts on anything else.
-     * (Vanilla US sha256 was 66871d66...09cfb.) */
-    static const uint8_t kZeldaUsaSha256[32] = {
-      0x9f,0xaf,0xc2,0xa6,0xb7,0xbd,0x8b,0x03,
-      0xaa,0xdd,0xc3,0x41,0x8b,0xde,0x66,0x26,
-      0xae,0xba,0xf4,0x4d,0x8a,0xc5,0x04,0x2e,
-      0x17,0x4f,0x73,0xb0,0x00,0x2b,0x7b,0x55,
+    /* The MSU-1 patch is applied internally at regen time, so YOU provide a
+     * normal STOCK ROM — at build time and at runtime. The MSU driver is
+     * compiled into the binary, so the stock US ROM runs fine (SPC music, or
+     * MSU streaming when a pack is present). We recognize the stock US 1.0
+     * image and the MSU-patched image; any other ROM still loads, with a
+     * warning (romhacks / other regions). */
+    static const uint8_t kZeldaKnownHashes[][32] = {
+      { /* "Legend of Zelda, The - A Link to the Past (USA).sfc" — US 1.0 */
+        0x66,0x87,0x1d,0x66,0xbe,0x19,0xad,0x2c,
+        0x34,0xc9,0x27,0xd6,0xb1,0x4c,0xd8,0xeb,
+        0x6f,0xc3,0x18,0x19,0x65,0xb6,0xe5,0x17,
+        0xcb,0x36,0x1f,0x73,0x16,0x00,0x9c,0xfb },
+      { /* MSU-1-patched (qwertymodo alttp_msu.ips applied, 1.5 MiB) */
+        0x9f,0xaf,0xc2,0xa6,0xb7,0xbd,0x8b,0x03,
+        0xaa,0xdd,0xc3,0x41,0x8b,0xde,0x66,0x26,
+        0xae,0xba,0xf4,0x4d,0x8a,0xc5,0x04,0x2e,
+        0x17,0x4f,0x73,0xb0,0x00,0x2b,0x7b,0x55 },
     };
     char *la_argv[2] = {
       (char *)"zelda",
       (char *)((argc >= 1 && argv[0]) ? argv[0] : "")
     };
     int la_argc = (la_argv[1][0] != '\0') ? 2 : 1;
-    extern int snesrecomp_launcher_resolve_rom_sha256(
-        int, char **, char *, size_t, const uint8_t *);
-    if (!snesrecomp_launcher_resolve_rom_sha256(la_argc, la_argv, rom_path_buf,
-                                                sizeof(rom_path_buf), kZeldaUsaSha256)) {
-      /* User cancelled the picker or repeatedly chose a non-matching ROM. */
+    extern int snesrecomp_launcher_resolve_rom_sha256_multi(
+        int, char **, char *, size_t, const uint8_t (*)[32], size_t);
+    if (!snesrecomp_launcher_resolve_rom_sha256_multi(
+            la_argc, la_argv, rom_path_buf, sizeof(rom_path_buf),
+            kZeldaKnownHashes, 2)) {
+      /* User cancelled the picker. */
       return 1;
     }
   }

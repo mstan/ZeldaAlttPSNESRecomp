@@ -117,46 +117,57 @@ section.
 
 ### Regenerating the recompiled C (contributors)
 
-1. Drop a legally-obtained `zelda.sfc` at the repo root (`.gitignore`
-   excludes it).
+1. Drop a legally-obtained **stock** `zelda.sfc` at the repo root
+   (`.gitignore` excludes it).
 2. Run:
    ```bash
-   python ../snesrecomp/tools/v2_regen.py --rom zelda.sfc --cfg-dir recomp --out-dir src/gen --prefix zelda
+   bash tools/regen.sh            # add --no-tests to skip the framework suite
    ```
+   This applies the bundled MSU-1 patch to a throwaway copy of your stock
+   ROM (`tools/apply_msu_patch.py`), regenerates `src/gen/` from the
+   patched image, and syncs `recomp/funcs.h`. Your stock ROM is left
+   untouched and is what you load at runtime.
 3. Rebuild as above.
 
-## MSU-1 audio (optional, this branch)
+## MSU-1 audio
 
-This `feat/msu-1` branch builds an **MSU-1 variant**: CD-quality streaming
-music in place of the SPC soundtrack, via the runner's MSU-1 support. It
-is a separate build from the standard one because it must be recompiled
-from an **MSU-1-patched ROM** (the patch injects the audio driver in
-bank `$22`, which `recomp/bank22.cfg` teaches the recompiler to emit).
+This build supports [MSU-1](https://sneslab.net/wiki/MSU1) — CD-quality
+streaming music in place of the SPC soundtrack — and you still just use
+your **stock** A Link to the Past (USA) ROM.
 
-**Build it:**
+**You don't patch anything.** The MSU-1 audio driver lives in an
+expansion bank the game's ROM doesn't normally have, so it has to be
+present when the recompiler runs. Instead of asking you for a patched
+ROM, the regen step applies the bundled, MIT-licensed MSU-1 patch
+([`recomp/msu1/`](recomp/msu1/)) to *your stock ROM* in a throwaway file
+and recompiles from that. The driver ends up compiled into the binary,
+so at **runtime you still load your stock ROM** — it plays the normal SPC
+soundtrack by default, and switches to MSU-1 streaming when a music pack
+is present.
 
-1. Patch a US 1.0 ROM (md5 `608c22b8…`) with qwertymodo's
-   [`alttp_msu.ips`](https://github.com/qwertymodo/MSU1-Zelda) → an
-   expanded 1.5 MB `zelda.sfc`.
-2. Regenerate from the *patched* ROM (the `recomp/bank22.cfg` on this
-   branch emits the driver):
-   ```bash
-   python ../snesrecomp/tools/v2_regen.py --rom zelda.sfc --cfg-dir recomp --out-dir src/gen --prefix zelda
-   python ../snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp --out recomp/funcs.h
-   ```
-3. Build as usual. (`src/main.c`'s ROM hash on this branch is the
-   *patched* image, so the launcher accepts it.)
+Regen does this automatically; see "Regenerating the recompiled C" above
+(it runs `tools/apply_msu_patch.py` for you). The patch targets the US
+1.0 ROM — if your ROM's hash doesn't match, regen warns that patching may
+fail but proceeds.
 
-**Run it with a music pack** — point `SNESRECOMP_MSU1` at the pack:
+**Add a music pack** — point `SNESRECOMP_MSU1` at it:
 
 ```sh
 # A folder: the pack base is auto-detected from its <name>-<N>.pcm files
 SNESRECOMP_MSU1=/path/to/alttp_msu_pack  zelda.exe zelda.sfc
 ```
 
-Without a pack (or env unset) it plays the normal SPC music — the driver
-detects no MSU-1 and falls back. SFX always stay on the SPC. Packs are
-the standard `<name>-<N>.pcm` set (44.1 kHz stereo); you supply your own.
+Without a pack (or with the env unset) you get the normal SPC music —
+the driver detects no MSU-1 and falls back. Sound effects always stay on
+the SPC. Packs are the standard `<name>-<N>.pcm` set (44.1 kHz stereo);
+you supply your own. The launcher recognizes the stock and MSU-patched
+images; any other ROM still loads, with a warning.
+
+### Thanks
+
+The MSU-1 driver is **not** ours — it's qwertymodo's ALttP MSU-1 patch,
+building on Conn's original work, shared freely under the MIT license. We
+bundle it with gratitude; see [`recomp/msu1/ATTRIBUTION.md`](recomp/msu1/ATTRIBUTION.md).
 
 ## Repo layout
 
