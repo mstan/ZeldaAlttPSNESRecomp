@@ -23,6 +23,9 @@
 #include "framedump.h"
 #include "config.h"
 #include "util.h"
+#if defined(SNES_LAUNCHER)
+#include "launcher_capi.h"   /* shared RmlUi pre-boot launcher (snes_launcher_run_window) */
+#endif
 #include "zelda_spc_player.h"
 
 #include "snes/snes.h"
@@ -667,6 +670,98 @@ int main(int argc, char** argv) {
         0xae,0xba,0xf4,0x4d,0x8a,0xc5,0x04,0x2e,
         0x17,0x4f,0x73,0xb0,0x00,0x2b,0x7b,0x55 },
     };
+    int rom_resolved_by_launcher = 0;
+
+#if defined(SNES_LAUNCHER)
+    /* GUI launcher: pick/verify ROM + tune settings before boot. Skipped for
+     * headless paths (--paused/--script/--framedump), an explicit positional
+     * ROM, or SNESRECOMP_NO_LAUNCHER. On UNAVAILABLE it falls through to the
+     * console resolver below. */
+    {
+      int headless = start_paused || (script_file != NULL) || (framedump_dir != NULL);
+      int have_positional = (argc >= 1 && argv[0] && argv[0][0] != '-' && argv[0][0] != '\0');
+      const char *no_launcher = getenv("SNESRECOMP_NO_LAUNCHER");
+      if (!headless && !have_positional && !(no_launcher && *no_launcher)) {
+        SnesLauncherCSettings ls;
+        memset(&ls, 0, sizeof(ls));
+        ls.output_method = g_config.output_method;
+        ls.window_scale  = g_config.window_scale ? g_config.window_scale : 2;
+        ls.fullscreen    = g_config.fullscreen;
+        ls.ignore_aspect = g_config.ignore_aspect_ratio;
+        ls.linear_filter = g_config.linear_filtering;
+        ls.widescreen    = (g_config.widescreen != 0);
+        ls.widescreen_hud= 1;   /* Zelda has no separate HUD-split flag */
+        ls.enable_audio  = g_config.enable_audio;
+        ls.audio_freq    = g_config.audio_freq;
+        ls.volume        = 100;
+        ls.player_src[0] = g_config.enable_gamepad[0] ? 2 : 1;
+        ls.player_src[1] = g_config.enable_gamepad[1] ? 2 : 0;
+        ls.deadzone[0] = ls.deadzone[1] = 30;
+        ls.msu1_enabled  = g_config.msu1_enabled;
+        snprintf(ls.msu1_dir, sizeof(ls.msu1_dir), "%s", g_config.msu1_dir);
+
+        char init_rom[512]; init_rom[0] = '\0';
+        {
+          FILE *rc = fopen("rom.cfg", "r");
+          if (rc) {
+            if (fgets(init_rom, sizeof(init_rom), rc)) {
+              size_t l = strlen(init_rom);
+              while (l && (init_rom[l-1] == '\n' || init_rom[l-1] == '\r')) init_rom[--l] = '\0';
+            }
+            fclose(rc);
+          }
+        }
+
+        SnesLauncherCGameInfo gi;
+        memset(&gi, 0, sizeof(gi));
+        gi.name = "The Legend of Zelda: A Link to the Past";
+        gi.region = "(USA)";
+        gi.expected_crc = 0x8137C34Du;   /* US 1.0, unheadered 1 MiB */
+        gi.has_expected_crc = 1;
+        gi.widescreen_supported = 1;
+        gi.known_sha256 = kZeldaKnownHashes;     /* stock + MSU-patched */
+        gi.num_known_sha256 = 2;
+        /* MSU-1: build is recompiled from qwertymodo's ALttP MSU-1 patch (driver
+         * in bank $22). Runs on the stock ROM; no pack -> native SPC. */
+        gi.msu1_supported = 1;
+        gi.msu1_note = "Uses qwertymodo's A Link to the Past MSU-1 patch \xE2\x80\x94 "
+                       "use a standard ALttP MSU-1 PCM pack.";
+
+        int act = snes_launcher_run_window(
+            "The Legend of Zelda: A Link to the Past \xE2\x80\x94 Launcher",
+            &ls, &gi, "launcher", init_rom, rom_path_buf, sizeof(rom_path_buf));
+        if (act == 1) return 0;   /* user closed the launcher */
+        if (act == 0) {
+          g_config.output_method       = (uint8)ls.output_method;
+          g_config.window_scale        = (uint8)ls.window_scale;
+          g_config.fullscreen          = (uint8)ls.fullscreen;
+          g_config.ignore_aspect_ratio = ls.ignore_aspect != 0;
+          g_config.linear_filtering    = ls.linear_filter != 0;
+          g_config.widescreen          = ls.widescreen ? 71 : 0;   /* ~16:9 */
+          g_config.enable_audio        = true;   /* always on; MSU-1 is the mode toggle */
+          g_config.audio_freq          = (uint16)ls.audio_freq;
+          g_config.enable_gamepad[0]   = ls.player_src[0] == 2;
+          g_config.enable_gamepad[1]   = ls.player_src[1] == 2;
+          g_config.msu1_enabled        = ls.msu1_enabled != 0;
+          snprintf(g_config.msu1_dir, sizeof(g_config.msu1_dir), "%s", ls.msu1_dir);
+          if (g_config.msu1_enabled && g_config.msu1_dir[0]) {
+            static char msu_env[600];
+            snprintf(msu_env, sizeof(msu_env), "SNESRECOMP_MSU1=%s", g_config.msu1_dir);
+            _putenv(msu_env);
+          }
+          WriteConfigFile(config_file);
+          if (rom_path_buf[0]) {
+            FILE *rc = fopen("rom.cfg", "w");
+            if (rc) { fprintf(rc, "%s\n", rom_path_buf); fclose(rc); }
+            rom_resolved_by_launcher = 1;
+          }
+        }
+        /* act == 2 (unavailable) -> console resolver below */
+      }
+    }
+#endif
+
+    if (!rom_resolved_by_launcher) {
     char *la_argv[2] = {
       (char *)"zelda",
       (char *)((argc >= 1 && argv[0]) ? argv[0] : "")
@@ -679,6 +774,7 @@ int main(int argc, char** argv) {
             kZeldaKnownHashes, 2)) {
       /* User cancelled the picker. */
       return 1;
+    }
     }
   }
   static char *resolved_argv[2];
@@ -1025,7 +1121,10 @@ error_reading:;
     // if vsync isn't working, delay manually
     curTick = SDL_GetTicks();
 
-    if (!g_snes->disableRender && !g_config.disable_frame_delay) {
+    /* Frame-delay pacing is always on (locks ~60 fps so SPC + MSU-1 audio stay
+     * in sync with the device). The old DisableFrameDelay option broke audio on
+     * non-60 Hz displays and was dropped. */
+    if (!g_snes->disableRender) {
       static const uint8 delays[3] = { 17, 17, 16 }; // 60 fps
       lastTick += delays[frameCtr % 3];
 

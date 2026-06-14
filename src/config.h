@@ -55,7 +55,11 @@ typedef struct Config {
   // ~71 ≈ 16:9 at 224 lines. Opt-in enhancement, default off.
   uint8 widescreen;
   bool display_perf_title;
-  bool disable_frame_delay;
+
+  // MSU-1 streamed audio (opt-in, default off). Persisted to config.ini [Sound];
+  // when enabled with a pack in msu1_dir the launcher exports SNESRECOMP_MSU1.
+  bool msu1_enabled;
+  char msu1_dir[512];
 
   char *memory_buffer;
   const char *shader;
@@ -92,5 +96,9 @@ enum {
 extern Config g_config;
 
 void ParseConfigFile(const char *filename);
+// Persist the launcher-editable settings back into `filename` (or config.ini)
+// with a surgical, comment-preserving in-place update. Called after the GUI
+// launcher returns PLAY.
+void WriteConfigFile(const char *filename);
 int FindCmdForSdlKey(SDL_Keycode code, SDL_Keymod mod);
 int FindCmdForGamepadButton(int button, uint32 modifiers);
