@@ -795,7 +795,7 @@ int main(int argc, char** argv) {
         memset(&gi, 0, sizeof(gi));
         gi.name = "The Legend of Zelda: A Link to the Past";
         gi.region = "(USA)";
-        gi.sram_path = "saves/smw.srm";  /* matches kZeldaGameInfo.title */
+        gi.sram_path = "saves/save.srm";  /* generic SRAM path (RtlReadSram migrates legacy) */
         gi.expected_crc = 0x8137C34Du;   /* US 1.0, unheadered 1 MiB */
         gi.has_expected_crc = 1;
         gi.widescreen_supported = 1;
