@@ -386,10 +386,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "DisplayPerfInTitle")) {
       return ParseBool(value, &g_config.display_perf_title);
     } else if (StringEqualsNoCase(key, "DisableFrameDelay")) {
-      /* Removed: frame-delay pacing is always on (audio sync). Accept the key
-       * from older config.ini files without erroring; the value is ignored. */
-      (void)value;
-      return true;
+      return ParseBool(value, &g_config.disable_frame_delay);
+    } else if (StringEqualsNoCase(key, "SkipLauncher")) {
+      return ParseBool(value, &g_config.skip_launcher);
     }
   } else if (section == 4) {
   }
@@ -451,6 +450,7 @@ void ParseConfigFile(const char *filename) {
    * = false` in config.ini overrides this. */
   g_config.enable_gamepad[0] = true;
   g_config.enable_gamepad[1] = true;
+  g_config.skip_launcher = false;
   /* MSU-1 streamed audio is opt-in (default off = authentic SPC audio). */
   g_config.msu1_enabled = false;
   g_config.msu1_dir[0] = '\0';
@@ -533,6 +533,8 @@ void WriteConfigFile(const char *filename) {
     { "Sound",    "Msu1Dir" },
     { "GamepadMap", "EnableGamepad1" },
     { "GamepadMap", "EnableGamepad2" },
+    { "General",    "SkipLauncher" },
+    { "GamepadMap", "GamepadDeadzone" },
   };
   const int N = (int)countof(kvs);
   snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.window_scale ? g_config.window_scale : 3);
@@ -544,6 +546,8 @@ void WriteConfigFile(const char *filename) {
   snprintf(kvs[6].val, sizeof(kvs[6].val), "%s", g_config.msu1_dir);
   snprintf(kvs[7].val, sizeof(kvs[7].val), "%s", g_config.enable_gamepad[0] ? "true" : "false");
   snprintf(kvs[8].val, sizeof(kvs[8].val), "%s", g_config.enable_gamepad[1] ? "true" : "false");
+  snprintf(kvs[9].val, sizeof(kvs[9].val), "%d", g_config.skip_launcher ? 1 : 0);
+  snprintf(kvs[10].val, sizeof(kvs[10].val), "%d", g_config.gamepad_deadzone);
 
   char *data = NULL;
   long sz = 0;

@@ -558,6 +558,43 @@ static const char *AbsolutizePathArg(const char *path, char *buf, size_t size) {
 }
 
 #undef main
+/* Issue #4: bring the selected ROM into the exe directory so it sits beside the
+ * saves/, config.ini and keybinds.ini already anchored there. Copies (never
+ * moves) the ROM under its basename and rewrites `rom_path` to the local copy.
+ * No-op when already in the exe dir or the copy can't be made. */
+static int RelocateRomToExeDir(char *rom_path, size_t cap) {
+  if (!rom_path || !rom_path[0]) return 0;
+  const char *base = rom_path;
+  for (const char *p = rom_path; *p; p++)
+    if (*p == '/' || *p == '\\') base = p + 1;
+  if (!*base) return 0;
+
+  char dst[1024];
+  if (!snesrecomp_exe_dir_path(base, dst, sizeof(dst))) return 0;
+#ifdef _WIN32
+  if (_stricmp(dst, rom_path) == 0) return 0;
+#else
+  if (strcmp(dst, rom_path) == 0) return 0;
+#endif
+
+  FILE *in = fopen(rom_path, "rb");
+  if (!in) return 0;
+  FILE *out = fopen(dst, "wb");
+  if (!out) { fclose(in); return 0; }
+  char buf[65536];
+  size_t n;
+  int ok = 1;
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+    if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+  fclose(in);
+  fclose(out);
+  if (!ok) { remove(dst); return 0; }
+
+  snprintf(rom_path, cap, "%s", dst);
+  printf("[Launcher] Copied ROM into the game directory: %s\n", dst);
+  return 1;
+}
+
 int main(int argc, char** argv) {
   signal(SIGSEGV, crash_handler);
   signal(SIGABRT, crash_handler);
@@ -614,6 +651,13 @@ int main(int argc, char** argv) {
     static char framedump_abs[1024];
     framedump_dir = AbsolutizePathArg(argv[1], framedump_abs, sizeof(framedump_abs));
     argc -= 2, argv += 2;
+  }
+  /* Force the GUI launcher even when SkipLauncher = 1 (the other way back is to
+   * set SkipLauncher = 0 in config.ini). */
+  int force_launcher = 0;
+  if (argc >= 1 && strcmp(argv[0], "--launcher") == 0) {
+    force_launcher = 1;
+    argc -= 1, argv += 1;
   }
   if (argc >= 1 && argv[0] && argv[0][0] != '-' && argv[0][0] != '\0') {
     /* Positional ROM path. */
@@ -689,7 +733,32 @@ int main(int argc, char** argv) {
       int headless = start_paused || (script_file != NULL) || (framedump_dir != NULL);
       int have_positional = (argc >= 1 && argv[0] && argv[0][0] != '-' && argv[0][0] != '\0');
       const char *no_launcher = getenv("SNESRECOMP_NO_LAUNCHER");
-      if (!headless && !have_positional && !(no_launcher && *no_launcher)) {
+      int want_launcher = !headless && !have_positional && !(no_launcher && *no_launcher);
+
+      /* SkipLauncher (#5): boot straight from the cached ROM unless --launcher
+       * forces the GUI. A missing/unreadable cache falls through to the launcher. */
+      if (want_launcher && g_config.skip_launcher && !force_launcher) {
+        char cached[512]; cached[0] = '\0';
+        FILE *rc = fopen("rom.cfg", "r");
+        if (rc) {
+          if (fgets(cached, sizeof(cached), rc)) {
+            size_t l = strlen(cached);
+            while (l && (cached[l-1] == '\n' || cached[l-1] == '\r')) cached[--l] = '\0';
+          }
+          fclose(rc);
+        }
+        if (cached[0]) {
+          FILE *probe = fopen(cached, "rb");
+          if (probe) {
+            fclose(probe);
+            snprintf(rom_path_buf, sizeof(rom_path_buf), "%s", cached);
+            rom_resolved_by_launcher = 1;
+            want_launcher = 0;
+          }
+        }
+      }
+
+      if (want_launcher) {
         SnesLauncherCSettings ls;
         memset(&ls, 0, sizeof(ls));
         ls.output_method = g_config.output_method;
@@ -704,7 +773,9 @@ int main(int argc, char** argv) {
         ls.volume        = 100;
         ls.player_src[0] = g_config.enable_gamepad[0] ? 2 : 1;
         ls.player_src[1] = g_config.enable_gamepad[1] ? 2 : 0;
-        ls.deadzone[0] = ls.deadzone[1] = 30;
+        /* Zelda stores deadzone as a raw stick radius; the launcher edits 0-100%. */
+        ls.deadzone[0] = ls.deadzone[1] = g_config.gamepad_deadzone * 100 / 32767;
+        ls.skip_launcher = g_config.skip_launcher;
         ls.msu1_enabled  = g_config.msu1_enabled;
         snprintf(ls.msu1_dir, sizeof(ls.msu1_dir), "%s", g_config.msu1_dir);
 
@@ -724,6 +795,7 @@ int main(int argc, char** argv) {
         memset(&gi, 0, sizeof(gi));
         gi.name = "The Legend of Zelda: A Link to the Past";
         gi.region = "(USA)";
+        gi.sram_path = "saves/smw.srm";  /* matches kZeldaGameInfo.title */
         gi.expected_crc = 0x8137C34Du;   /* US 1.0, unheadered 1 MiB */
         gi.has_expected_crc = 1;
         gi.widescreen_supported = 1;
@@ -750,6 +822,8 @@ int main(int argc, char** argv) {
           g_config.audio_freq          = (uint16)ls.audio_freq;
           g_config.enable_gamepad[0]   = ls.player_src[0] == 2;
           g_config.enable_gamepad[1]   = ls.player_src[1] == 2;
+          g_config.gamepad_deadzone    = ls.deadzone[0] * 32767 / 100;
+          g_config.skip_launcher       = ls.skip_launcher != 0;
           g_config.msu1_enabled        = ls.msu1_enabled != 0;
           snprintf(g_config.msu1_dir, sizeof(g_config.msu1_dir), "%s", ls.msu1_dir);
           if (g_config.msu1_enabled && g_config.msu1_dir[0]) {
@@ -785,6 +859,26 @@ int main(int argc, char** argv) {
     }
     }
   }
+  /* Honor MSU-1 on every boot path (the launcher exports it too; skip-launcher /
+   * positional boots need it set here). An existing env value wins. */
+  if (g_config.msu1_enabled && g_config.msu1_dir[0] && !getenv("SNESRECOMP_MSU1")) {
+    static char msu_env[600];
+    snprintf(msu_env, sizeof(msu_env), "SNESRECOMP_MSU1=%s", g_config.msu1_dir);
+#ifdef _WIN32
+    _putenv(msu_env);
+#else
+    setenv("SNESRECOMP_MSU1", g_config.msu1_dir, 1);
+#endif
+  }
+
+  /* Issue #4: co-locate the ROM with the exe (interactive launches only). */
+  if (!start_paused && script_file == NULL && framedump_dir == NULL) {
+    if (RelocateRomToExeDir(rom_path_buf, sizeof(rom_path_buf))) {
+      FILE *rc = fopen("rom.cfg", "w");
+      if (rc) { fprintf(rc, "%s\n", rom_path_buf); fclose(rc); }
+    }
+  }
+
   static char *resolved_argv[2];
   resolved_argv[0] = rom_path_buf;
   resolved_argv[1] = NULL;
@@ -1129,10 +1223,12 @@ error_reading:;
     // if vsync isn't working, delay manually
     curTick = SDL_GetTicks();
 
-    /* Frame-delay pacing is always on (locks ~60 fps so SPC + MSU-1 audio stay
-     * in sync with the device). The old DisableFrameDelay option broke audio on
-     * non-60 Hz displays and was dropped. */
-    if (!g_snes->disableRender) {
+    /* Frame-delay pacing locks the loop to ~60 fps so SPC + MSU-1 audio stays
+     * in sync with the sound device. On by default. Power users on an
+     * exactly-60 Hz / vsync-correct display can set DisableFrameDelay = 1 in
+     * config.ini (cfg-only, no UI) to skip it for slightly better perf — at the
+     * risk of audio desync on other displays. */
+    if (!g_snes->disableRender && !g_config.disable_frame_delay) {
       static const uint8 delays[3] = { 17, 17, 16 }; // 60 fps
       lastTick += delays[frameCtr % 3];
 
