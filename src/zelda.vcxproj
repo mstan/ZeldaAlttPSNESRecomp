@@ -247,6 +247,9 @@
       <ExcludedFromBuild Condition="'$(Configuration)'=='Production'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\snesrecomp\runner\src\audio_trace.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\ppu_dma_trace.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\snes\interp816.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\snes\interp_bridge.c" />
     <ClCompile Include="config.c" />
     <ClCompile Include="glsl_shader.c" />
     <ClCompile Include="main.c" />
