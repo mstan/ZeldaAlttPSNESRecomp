@@ -7,6 +7,7 @@
 #include "debug_server.h"
 #include "cpu_trace.h"
 #include "widescreen.h"  // g_ws_extra, PpuSetExtraSideSpace via snes/ppu.h
+#include "snes/interp_bridge.h"   /* faithful LLE of the $8034 main loop */
 
 /* HLE the polyhedral coroutine that the SNES runs on a separate stack
  * (NMI tail context-switches into it; it loops at $09:F81D, runs one
@@ -300,7 +301,37 @@ void RunOneFrameOfGame(void) {
    * boot-time REP #$38 in I_RESET is expected and intentional; we only
    * want to know where x flips during ProcessGameMode dispatch. */
   cpu_trace_arm_px_tripwire();
-  RunOneFrameOfGame_Internal();
+  /* Swappable scheduler tier (mirrors mmx_rtl.c / smw_rtl.c). ALttP has no
+   * cooperative task scheduler — its "scheduler" is the single main loop at
+   * $00:8034:
+   *     $8034: LDA $12 ; BEQ $8034            ; vblank-wait spin (NMI sets $12)
+   *            ... INC $1A ; JSR ClearOamBuffer ; JSL Module_MainRouting ;
+   *            JSR NMI_PrepareSprites ; STZ $12 ; BRA $8034
+   * so LLE is interp_bridge_run_scheduler with entry == yield == the spin PC
+   * (bank $00 — reset leaves PB=$00 and the BRA loop never leaves bank 0) and
+   * flag == waiting_for_vblank ($12). The interp runs the real per-frame body
+   * (incl. the alternate-frame slowdown path the HLE reproduces by hand) and
+   * bounces module code to compiled bodies via the paired ABI (or interprets
+   * when SNESRECOMP_LLE_BOUNCE=0). I_NMI already set $12 != 0; force it too so
+   * frame 0 (I_NMI skipped) processes — matches MMX's waiting_for_vblank=0xFF.
+   *
+   * HLE (default, shipped) stays RunOneFrameOfGame_Internal. Opt-in LLE via
+   * SNESRECOMP_ZELDA_SCHED_LLE=1; per-build default ZELDA_SCHED_LLE_DEFAULT
+   * (0 = HLE, keeps production). */
+#ifndef ZELDA_SCHED_LLE_DEFAULT
+#define ZELDA_SCHED_LLE_DEFAULT 0
+#endif
+  { static int s_lle = -1;
+    if (s_lle < 0) { s_lle = ZELDA_SCHED_LLE_DEFAULT;
+                     const char *e = getenv("SNESRECOMP_ZELDA_SCHED_LLE");
+                     if (e && e[0]) s_lle = (e[0] != '0') ? 1 : 0; }
+    if (s_lle) {
+      waiting_for_vblank = 0xFF;
+      interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
+    } else {
+      RunOneFrameOfGame_Internal();
+    }
+  }
   ZeldaRestoreMainCpuAbi();
   cpu_trace_px_breadcrumb(&g_cpu, 0x2003, "after_Internal");
   g_first_frame_done = true;

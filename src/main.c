@@ -1220,10 +1220,26 @@ error_reading:;
     // Bank validation removed — 100% oracle mode, no banks enabled.
 
     frameCtr++;
+    /* Dev-only headless turbo stress (SNESRECOMP_FORCE_TURBO=1): forces the
+     * turbo path every frame so an automated soak can exercise the LLE path's
+     * turbo-safety without a human holding Tab. Env-gated; no ship effect. */
+    { static int s_ft = -1;
+      if (s_ft < 0) { const char *e = getenv("SNESRECOMP_FORCE_TURBO");
+                      s_ft = (e && e[0] && e[0] != '0') ? 1 : 0; }
+      if (s_ft) g_turbo = 1; }
     g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
 
-    if (!g_snes->disableRender)
+    if (!g_snes->disableRender) {
       DrawPpuFrameWithPerf();
+    } else {
+      /* Turbo (render skipped): draw_ppu_frame also simulates HDMA + fires the
+       * raster IRQ (I_IRQ). Under the LLE scheduler (SNESRECOMP_ZELDA_SCHED_LLE)
+       * the game runs the REAL NMI/IRQ machinery; skipping the raster IRQ would
+       * let an IRQ-gated path spin → 5s watchdog longjmp mid-frame → guest stack
+       * leak → wedge (the MMX turbo garble class). Run the guest-state sim every
+       * frame; skip only the host present. Harmless to HLE. */
+      g_rtl_game_info->draw_ppu_frame();
+    }
 
     // if vsync isn't working, delay manually
     curTick = SDL_GetTicks();
