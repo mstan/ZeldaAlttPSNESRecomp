@@ -37,7 +37,10 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 # Build Production (console-free, optimized). Builds the launcher + stages its
 # assets into build\bin-x64-Production\launcher\ via the project's copy targets.
-& $MSBuild (Join-Path $root 'zelda.sln') /p:Configuration=Production /p:Platform=x64 /m /v:quiet /nologo
+# SnesRecompBuildVersion stamps SNESRECOMP_BUILD_VERSION into the exe so
+# user crash reports (last_run_report.json / crash_report_*.json) name the
+# release they came from.
+& $MSBuild (Join-Path $root 'zelda.sln') /p:Configuration=Production /p:Platform=x64 "/p:SnesRecompBuildVersion=$Version" /m /v:quiet /nologo
 if ($LASTEXITCODE -ne 0) { throw "MSBuild failed ($LASTEXITCODE)" }
 
 $stageName = "ZeldaAlttPSNESRecomp-windows-x64-v$Version"
@@ -107,6 +110,17 @@ what changed in v$Version.
 $zip = Join-Path $out "$stageName.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path "$stage\*" -DestinationPath $zip
+
+# Archive the PDB NEXT TO the zip (never inside it): it's what turns a
+# user's crash_minidump_*.dmp / module+offset stack into file:line. Keep
+# it with the release artifacts forever.
+$pdb = Join-Path $bin 'zelda.pdb'
+if (Test-Path $pdb) {
+  Copy-Item $pdb (Join-Path $out "zelda-$Version.pdb")
+  Write-Host "PDB archived: $out\zelda-$Version.pdb (do NOT ship; keep for symbolizing user crash dumps)"
+} else {
+  Write-Warning "zelda.pdb missing from $bin - crash minidumps from this release won't symbolize."
+}
 Write-Host "--- $stageName ---"
 Get-ChildItem $stage | Select-Object Name, Length | Out-Host
 Get-Item $zip | Select-Object Name, Length | Out-Host
