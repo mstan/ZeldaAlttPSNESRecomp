@@ -3,7 +3,13 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = 8c14fc11eb5bea8730545a83ba1686de08463340
+sha = aeab6c029113989d904c2fa6bd5c786ca05550a2
+# 2026-07-13 bump (8c14fc1 -> aeab6c0): partial regeneration now treats
+# every variant symbol referenced by preserved generated banks as an immutable
+# link root, and direct tail calls demand the live architectural M/X variant
+# before survivor routing. Fixes Zelda's rain-overlay conversion entering the
+# shared Map16-to-Map8 body as M1X1 after REP #$30. Includes regression tests
+# and the long-term analysis/emission redesign in the engine ISSUES.md.
 # 2026-07-13 bump (11e11fe -> 8c14fc1): CPU-to-SPC port writes now use
 # hardware-immediate visibility by default. The host wall-time deferred path
 # remains only as an explicit diagnostic override, keeping APU semantics
