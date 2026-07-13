@@ -1323,7 +1323,7 @@ error_reading:;
       DrawPpuFrameWithPerf();
     } else {
       /* Turbo (render skipped): draw_ppu_frame also simulates HDMA + fires the
-       * raster IRQ (I_IRQ). Under the LLE scheduler (SNESRECOMP_ZELDA_SCHED_LLE)
+       * raster IRQ (I_IRQ). Under the default LLE scheduler
        * the game runs the REAL NMI/IRQ machinery; skipping the raster IRQ would
        * let an IRQ-gated path spin → 5s watchdog longjmp mid-frame → guest stack
        * leak → wedge (the MMX turbo garble class). Run the guest-state sim every

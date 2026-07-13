@@ -3,11 +3,18 @@
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
 #include "cpu_state.h"
+#include "execution_mode.h"
 #include "funcs.h"
 #include "debug_server.h"
 #include "cpu_trace.h"
 #include "widescreen.h"  // g_ws_extra, PpuSetExtraSideSpace via snes/ppu.h
 #include "snes/interp_bridge.h"   /* faithful LLE of the $8034 main loop */
+
+static SnesrecompExecutionMode zelda_execution_mode(void) {
+  /* LLE is the correctness floor. The hand-written frame driver remains an
+   * explicit optimization selected with SNESRECOMP_EXECUTION_MODE=hle. */
+  return snesrecomp_execution_mode(SNESRECOMP_EXECUTION_MODE_LLE);
+}
 
 /* HLE the polyhedral coroutine that the SNES runs on a separate stack
  * (NMI tail context-switches into it; it loops at $09:F81D, runs one
@@ -315,17 +322,11 @@ void RunOneFrameOfGame(void) {
    * when SNESRECOMP_LLE_BOUNCE=0). I_NMI already set $12 != 0; force it too so
    * frame 0 (I_NMI skipped) processes — matches MMX's waiting_for_vblank=0xFF.
    *
-   * HLE (default, shipped) stays RunOneFrameOfGame_Internal. Opt-in LLE via
-   * SNESRECOMP_ZELDA_SCHED_LLE=1; per-build default ZELDA_SCHED_LLE_DEFAULT
-   * (0 = HLE, keeps production). */
-#ifndef ZELDA_SCHED_LLE_DEFAULT
-#define ZELDA_SCHED_LLE_DEFAULT 0
-#endif
-  { static int s_lle = -1;
-    if (s_lle < 0) { s_lle = ZELDA_SCHED_LLE_DEFAULT;
-                     const char *e = getenv("SNESRECOMP_ZELDA_SCHED_LLE");
-                     if (e && e[0]) s_lle = (e[0] != '0') ? 1 : 0; }
-    if (s_lle) {
+   * LLE is the default correctness path. The existing HLE frame driver stays
+   * available as a convenience override through the shared execution-mode
+   * option rather than a Zelda-specific scheduler switch. */
+  {
+    if (zelda_execution_mode() == SNESRECOMP_EXECUTION_MODE_LLE) {
       waiting_for_vblank = 0xFF;
       interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
     } else {

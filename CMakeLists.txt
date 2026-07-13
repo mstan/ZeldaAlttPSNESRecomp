@@ -20,6 +20,13 @@ include(${SNESRECOMP_ROOT}/runner/runner.cmake)
 find_package(SDL2 REQUIRED)
 find_package(OpenGL REQUIRED)
 
+# MinGW's SDL2 package includes SDL2main by default, but Zelda provides a plain
+# main() and uses the CRT entry point (matching the MSVC project). Linking the
+# forwarding shim would instead require SDL_main().
+if(WIN32)
+    list(FILTER SDL2_LIBRARIES EXCLUDE REGEX "SDL2main")
+endif()
+
 # Generated recompiler output (produced by tools/regen.sh; not committed).
 file(GLOB ZELDA_GEN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gen/*.c)
 if(NOT ZELDA_GEN_SOURCES)
@@ -83,3 +90,8 @@ target_link_libraries(ZeldaALttPSNESRecomp PRIVATE
     OpenGL::GL
     m                                 # libm: glsl_shader.c uses pow() (implicit on macOS)
 )
+
+if(WIN32)
+    # Trace/debug-server sockets and post-mortem symbolization.
+    target_link_libraries(ZeldaALttPSNESRecomp PRIVATE ws2_32 dbghelp)
+endif()
