@@ -3,7 +3,11 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = aeab6c029113989d904c2fa6bd5c786ca05550a2
+sha = 88c41ad77c5f4c99198d778f6318995d3d9d2c03
+# 2026-07-13 LLE-first redesign checkpoint (aeab6c0 -> 88c41ad):
+# deterministic atomic manifest emission, exact architectural AOT/LLE
+# boundaries, RTI-aware mixed-tier interrupts, safe profile roots, and HLE
+# overlays that cover every runtime M/X mode without leaking tail metadata.
 # 2026-07-13 bump (8c14fc1 -> aeab6c0): partial regeneration now treats
 # every variant symbol referenced by preserved generated banks as an immutable
 # link root, and direct tail calls demand the live architectural M/X variant
