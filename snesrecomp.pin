@@ -3,7 +3,12 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = 88c41ad77c5f4c99198d778f6318995d3d9d2c03
+sha = f6e300193e9d68950b4982753f4169165e138e14
+# 2026-07-14 bump (88c41ad -> f6e3001): preserve guest non-local returns
+# when a directly bounced AOT root skips an interpreted ancestor. The owning
+# interpreter now resumes at the popped architectural return PC instead of
+# continuing code the ROM already returned past. Fixes new-file startup
+# dialogue self-return/freeze; F0 reproduction and user gameplay validated.
 # 2026-07-13 LLE-first redesign checkpoint (aeab6c0 -> 88c41ad):
 # deterministic atomic manifest emission, exact architectural AOT/LLE
 # boundaries, RTI-aware mixed-tier interrupts, safe profile roots, and HLE
