@@ -261,6 +261,7 @@
     <ClCompile Include="..\snesrecomp\runner\src\ppu_dma_trace.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\interp816.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\interp_bridge.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\execution_mode.c" />
     <ClCompile Include="config.c" />
     <ClCompile Include="glsl_shader.c" />
     <ClCompile Include="main.c" />
@@ -313,6 +314,7 @@
     <ClCompile Include="..\snesrecomp\runner\src\snes\ppu_old.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\snes.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\snes_other.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\snes\superfx.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\spc.c">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">MinSpace</Optimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MinSpace</Optimization>
