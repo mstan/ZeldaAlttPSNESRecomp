@@ -3,7 +3,10 @@
 # repo evolving on its own cadence). Update via:
 #   git -C ../snesrecomp rev-parse main > /tmp/sha && \
 #     sed -i "s|^sha = .*|sha = $(cat /tmp/sha)|" snesrecomp.pin
-sha = f6e300193e9d68950b4982753f4169165e138e14
+sha = 279d7877a0e9d23b9df2fbf7c3e9b04a4842a161
+# 2026-07-14 DerrickGold candidate integration validated in Zelda 16:9:
+# SimpleHDMA bounds, generated bank sharding, opt-in widescreen policies,
+# no-sprite-limits support, and the filtered interpreter policy hook.
 # 2026-07-14 bump (88c41ad -> f6e3001): preserve guest non-local returns
 # when a directly bounced AOT root skips an interpreted ancestor. The owning
 # interpreter now resumes at the popped architectural return PC instead of
