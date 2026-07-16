@@ -841,7 +841,7 @@ int main(int argc, char** argv) {
         gi.region = "(USA)";
         gi.sram_path = "saves/save.srm";  /* generic SRAM path (RtlReadSram migrates legacy) */
         gi.num_players = 1;               /* single active controller (no P2 row) */
-        gi.expected_crc = 0x8137C34Du;   /* US 1.0, unheadered 1 MiB */
+        gi.expected_crc = 0x777AAC2Fu;   /* US 1.0, unheadered 1 MiB (matches kZeldaKnownHashes[0]) */
         gi.has_expected_crc = 1;
         gi.widescreen_supported = 1;
         gi.known_sha256 = kZeldaKnownHashes;     /* stock + MSU-patched */
