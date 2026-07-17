@@ -17,6 +17,11 @@ set(CMAKE_C_STANDARD 11)
 set(SNESRECOMP_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp)
 include(${SNESRECOMP_ROOT}/runner/runner.cmake)
 
+# Launcher UI backend: the SHARED recomp-ui launcher (F:\Projects\recomp-ui,
+# consumed as the ./recomp-ui submodule/junction) so every recomp game drives
+# ONE launcher repo. Mirrors MegamanXRecomp/StarFoxSNESRecomp.
+include(${CMAKE_SOURCE_DIR}/recomp-ui/recomp_ui.cmake)
+
 find_package(SDL2 REQUIRED)
 find_package(OpenGL REQUIRED)
 
@@ -54,6 +59,12 @@ add_executable(ZeldaALttPSNESRecomp
     # recompiled banks (generated)
     ${ZELDA_GEN_SOURCES}
 )
+
+# Dear ImGui pre-boot launcher (GUI) from the shared recomp-ui repo. One call
+# wires sources/includes/RECOMP_LAUNCHER define/CXX/asset-staging (same Zelda
+# boxart; recomp-ui's default pad.tga is already the SNES pad).
+recomp_target_launcher_ui(ZeldaALttPSNESRecomp
+    BOXART ${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga)
 
 target_include_directories(ZeldaALttPSNESRecomp PRIVATE
     ${CMAKE_SOURCE_DIR}
