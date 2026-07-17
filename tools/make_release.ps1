@@ -1,8 +1,9 @@
 <#
-make_release.ps1 - build the Zelda ALttP windows release zip.
+make_release.ps1 - package the Zelda ALttP windows release zip.
 
-Ships ONE windows zip (and ONLY a zip - never a bare exe; zelda.exe is
-useless without SDL2.dll and the launcher/ assets):
+Ships ONE windows zip (and ONLY a zip - never a bare exe;
+ZeldaALttPSNESRecomp.exe is useless without SDL2.dll and the assets/
+folder recomp-ui stages next to it):
 
   ZeldaAlttPSNESRecomp-windows-x64-v<Version>.zip
 
@@ -13,60 +14,96 @@ Widescreen = 0 (authentic); the player flips it in the launcher (Settings ->
 Widescreen). Widescreen is runtime-gated (no gen-injection), so off is
 byte-identical to the faithful build.
 
-The zip contains: zelda.exe (Production|x64, console-free), SDL2.dll,
-config.ini (Widescreen = 0), keybinds.ini (if present), launcher/ (the GUI
-launcher's RmlUi assets: launcher.rml, fonts, img, boxart), and README.md.
-Release-specific "what's new" belongs in the gh release body, not the zip.
+The build itself is intentionally separate so developers can choose their
+toolchain and keep compilation priority under local control. The resulting
+zip contains ZeldaALttPSNESRecomp.exe, MinGW runtime dependencies, config.ini
+(Widescreen = 0), keybinds.ini (if present), assets/ (the recomp-ui
+launcher's assets: fonts, img, boxart), and README.md. Release-specific
+"what's new" belongs in the gh release body, not the zip. ROMs and
+ROM-derived generated C are never staged.
 
 Zips land in release-stage\. Publish via gh AFTER the user signs off:
 
   gh release create v<Version> `
       release-stage\ZeldaAlttPSNESRecomp-windows-x64-v<Version>.zip
 
-Usage: powershell -File tools\make_release.ps1 -Version 0.5.0
+Example:
+  powershell -File tools\make_release.ps1 -Version 0.6.0 `
+    -BuildDir build-recompui -RuntimeBinDir C:\msys64\mingw64\bin
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Version,
-  [string]$MSBuild = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe'
+  [string]$BuildDir = 'build-recompui',
+  [string]$RuntimeBinDir = 'C:\msys64\mingw64\bin'
 )
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$bin = Join-Path $root 'build\bin-x64-Production'
+$build = Join-Path $root $BuildDir
+$exe = Join-Path $build 'ZeldaALttPSNESRecomp.exe'
+$assets = Join-Path $build 'assets'
+
+if (-not (Test-Path -LiteralPath $exe)) {
+  throw "Release executable missing: $exe"
+}
+if (-not (Test-Path -LiteralPath $assets)) {
+  throw "recomp-ui launcher assets/ missing: $assets"
+}
+
 $out = Join-Path $root 'release-stage'
-New-Item -ItemType Directory -Force $out | Out-Null
-
-# Build Production (console-free, optimized). Builds the launcher + stages its
-# assets into build\bin-x64-Production\launcher\ via the project's copy targets.
-# SnesRecompBuildVersion stamps SNESRECOMP_BUILD_VERSION into the exe so
-# user crash reports (last_run_report.json / crash_report_*.json) name the
-# release they came from.
-& $MSBuild (Join-Path $root 'zelda.sln') /p:Configuration=Production /p:Platform=x64 "/p:SnesRecompBuildVersion=$Version" /m /v:quiet /nologo
-if ($LASTEXITCODE -ne 0) { throw "MSBuild failed ($LASTEXITCODE)" }
-
 $stageName = "ZeldaAlttPSNESRecomp-windows-x64-v$Version"
 $stage = Join-Path $out $stageName
-if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-New-Item -ItemType Directory -Force $stage | Out-Null
+$zip = Join-Path $out "$stageName.zip"
 
-Copy-Item (Join-Path $bin 'zelda.exe') $stage
-Copy-Item (Join-Path $bin 'SDL2.dll') $stage
-# config.ini ships Widescreen = 0; the launcher toggles + persists it.
-(Get-Content (Join-Path $root 'config.ini') -Raw) -replace '(?m)^Widescreen\s*=.*$', 'Widescreen = 0' |
+$outFull = [IO.Path]::GetFullPath($out).TrimEnd('\') + '\'
+$stageFull = [IO.Path]::GetFullPath($stage)
+$zipFull = [IO.Path]::GetFullPath($zip)
+if (-not $stageFull.StartsWith($outFull, [StringComparison]::OrdinalIgnoreCase) -or
+    -not $zipFull.StartsWith($outFull, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Refusing to clean release paths outside release-stage.'
+}
+
+if (Test-Path -LiteralPath $stage) {
+  Remove-Item -LiteralPath $stage -Recurse -Force
+}
+if (Test-Path -LiteralPath $zip) {
+  Remove-Item -LiteralPath $zip -Force
+}
+New-Item -ItemType Directory -Path $stage -Force | Out-Null
+
+Copy-Item -LiteralPath $exe -Destination $stage
+
+# config.ini ships Widescreen = 0 (authentic); the launcher toggles + persists it.
+(Get-Content -LiteralPath (Join-Path $root 'config.ini') -Raw) -replace '(?m)^Widescreen\s*=.*$', 'Widescreen = 0' |
   Out-File (Join-Path $stage 'config.ini') -Encoding utf8 -NoNewline
-$kb = Join-Path $bin 'keybinds.ini'
-if (Test-Path $kb) { Copy-Item $kb $stage }
 
-# Launcher assets (RmlUi) - the GUI menu needs these next to the exe.
-$launcherSrc = Join-Path $bin 'launcher'
-if (-not (Test-Path $launcherSrc)) { throw "launcher/ assets missing at $launcherSrc - did the Production build run the CopyLauncherAssets target?" }
-Copy-Item $launcherSrc $stage -Recurse
+$kb = Join-Path $build 'keybinds.ini'
+if (Test-Path -LiteralPath $kb) {
+  Copy-Item -LiteralPath $kb -Destination $stage
+}
+
+Copy-Item -LiteralPath $assets -Destination $stage -Recurse
+
+$runtimeDlls = @(
+  'SDL2.dll',
+  'libgcc_s_seh-1.dll',
+  'libstdc++-6.dll',
+  'libwinpthread-1.dll'
+)
+foreach ($name in $runtimeDlls) {
+  $source = Join-Path $RuntimeBinDir $name
+  if (-not (Test-Path -LiteralPath $source)) {
+    throw "Required MinGW runtime DLL missing: $source"
+  }
+  Copy-Item -LiteralPath $source -Destination $stage
+}
 
 @"
 # Legend of Zelda: A Link to the Past - SNES static recompilation (Windows x64)
 
 This is the **Production** build: an optimized, console-free native port -
-running ``zelda.exe`` opens a launcher, then the game window, with no
-terminal/debug console.
+running ``ZeldaALttPSNESRecomp.exe`` opens a launcher, then the game window,
+with no terminal/debug console.
 
 Static recompilation turns the game's 65816 CPU code into native C (via the
 [snesrecomp](https://github.com/mstan/snesrecomp) framework); the rest of the
@@ -75,9 +112,10 @@ core.
 
 ## How to run
 
-1. Extract this folder anywhere (keep ``launcher/`` next to ``zelda.exe``).
-2. Run ``zelda.exe``. A launcher opens: pick your **legally-obtained**
-   *A Link to the Past (USA)* ROM (``.sfc`` / ``.smc``), tune settings, press PLAY.
+1. Extract this folder anywhere (keep ``assets\`` next to the exe).
+2. Run ``ZeldaALttPSNESRecomp.exe``. A launcher opens: pick your
+   **legally-obtained** *A Link to the Past (USA)* ROM (``.sfc`` / ``.smc``),
+   tune settings, press PLAY.
    - Expected SHA-256:
      ``66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb``
    - 512-byte SMC copier headers are auto-stripped before hashing.
@@ -107,20 +145,8 @@ See the repo's ``ISSUES.md`` for known issues, and the GitHub release notes for
 what changed in v$Version.
 "@ | Out-File (Join-Path $stage 'README.md') -Encoding utf8
 
-$zip = Join-Path $out "$stageName.zip"
-if (Test-Path $zip) { Remove-Item -Force $zip }
-Compress-Archive -Path "$stage\*" -DestinationPath $zip
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
 
-# Archive the PDB NEXT TO the zip (never inside it): it's what turns a
-# user's crash_minidump_*.dmp / module+offset stack into file:line. Keep
-# it with the release artifacts forever.
-$pdb = Join-Path $bin 'zelda.pdb'
-if (Test-Path $pdb) {
-  Copy-Item $pdb (Join-Path $out "zelda-$Version.pdb")
-  Write-Host "PDB archived: $out\zelda-$Version.pdb (do NOT ship; keep for symbolizing user crash dumps)"
-} else {
-  Write-Warning "zelda.pdb missing from $bin - crash minidumps from this release won't symbolize."
-}
 Write-Host "--- $stageName ---"
-Get-ChildItem $stage | Select-Object Name, Length | Out-Host
-Get-Item $zip | Select-Object Name, Length | Out-Host
+Get-ChildItem -LiteralPath $stage | Select-Object Name, Length | Out-Host
+Get-FileHash -LiteralPath $zip -Algorithm SHA256 | Out-Host
