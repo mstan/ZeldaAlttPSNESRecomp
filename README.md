@@ -93,7 +93,7 @@ System shortcuts (configured in `config.ini`'s `[KeyMap]` section):
 ## Building from source
 
 Prerequisites: Windows 10+, Visual Studio 2022 (with C++ desktop
-workload), Python 3.9+ on PATH.
+workload), Python 3.9+ on PATH, and `rustup` for regeneration.
 
 ```bash
 git clone https://github.com/mstan/ZeldaAlttPSNESRecomp
@@ -126,7 +126,9 @@ section.
    This applies the bundled MSU-1 patch to a throwaway copy of your stock
    ROM (`tools/apply_msu_patch.py`), regenerates `src/gen/` from the
    patched image, and syncs `recomp/funcs.h`. Your stock ROM is left
-   untouched and is what you load at runtime.
+   untouched and is what you load at runtime. The script builds and requires
+   the fast native analyzer; set `SNESRECOMP_ANALYSIS_BACKEND=python` only to
+   run the slower reference implementation.
 3. Rebuild as above.
 
 ## MSU-1 audio

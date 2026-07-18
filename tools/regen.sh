@@ -47,6 +47,17 @@ fi
 
 step() { echo; echo "=== $* ==="; }
 
+ANALYSIS_BACKEND="${SNESRECOMP_ANALYSIS_BACKEND:-native}"
+case "$ANALYSIS_BACKEND" in
+  native|python|auto) ;;
+  *) echo "regen.sh: invalid SNESRECOMP_ANALYSIS_BACKEND: $ANALYSIS_BACKEND" >&2; exit 2 ;;
+esac
+
+if [ "$ANALYSIS_BACKEND" = native ]; then
+  step "Building native analyzer"
+  "$PYTHON" snesrecomp/tools/build_native_analyzer.py
+fi
+
 # MSU-1: the build is recompiled from an MSU-1-patched ROM (the patch injects
 # the audio driver in bank $22; recomp/bank22.cfg emits it). We apply the
 # bundled, MIT-licensed qwertymodo patch to the user's STOCK rom in a
@@ -67,7 +78,8 @@ step "Regenerating banks"
 # also removes legacy title-prefixed units from staging before publication, so
 # a failed regeneration cannot leave the live output half-updated.
 "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
-    --cfg-dir recomp --out-dir src/gen
+    --cfg-dir recomp --out-dir src/gen \
+    --analysis-backend "$ANALYSIS_BACKEND"
 
 step "Syncing funcs.h"
 "$PYTHON" snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp \
@@ -78,7 +90,8 @@ if [ "$STRICT_IDEMPOTENT" -eq 1 ]; then
   TMP_GEN="$(mktemp -d)"
   trap 'rm -rf "$TMP_GEN"' EXIT
   "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
-      --cfg-dir recomp --out-dir "$TMP_GEN"
+      --cfg-dir recomp --out-dir "$TMP_GEN" \
+      --analysis-backend "$ANALYSIS_BACKEND"
   "$PYTHON" snesrecomp/tools/v2_compare_output.py \
       --expected src/gen --actual "$TMP_GEN"
 fi
