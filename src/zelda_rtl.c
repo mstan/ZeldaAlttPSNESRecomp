@@ -3,18 +3,11 @@
 #include "common_cpu_infra.h"
 #include "snes/snes.h"
 #include "cpu_state.h"
-#include "execution_mode.h"
 #include "funcs.h"
 #include "debug_server.h"
 #include "cpu_trace.h"
 #include "widescreen.h"  // g_ws_extra, PpuSetExtraSideSpace via snes/ppu.h
 #include "snes/interp_bridge.h"   /* faithful LLE of the $8034 main loop */
-
-static SnesrecompExecutionMode zelda_execution_mode(void) {
-  /* LLE is the correctness floor. The hand-written frame driver remains an
-   * explicit optimization selected with SNESRECOMP_EXECUTION_MODE=hle. */
-  return snesrecomp_execution_mode(SNESRECOMP_EXECUTION_MODE_LLE);
-}
 
 /* HLE the polyhedral coroutine that the SNES runs on a separate stack
  * (NMI tail context-switches into it; it loops at $09:F81D, runs one
@@ -326,12 +319,12 @@ void RunOneFrameOfGame(void) {
    * available as a convenience override through the shared execution-mode
    * option rather than a Zelda-specific scheduler switch. */
   {
-    if (zelda_execution_mode() == SNESRECOMP_EXECUTION_MODE_LLE) {
-      waiting_for_vblank = 0xFF;
-      interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
-    } else {
-      RunOneFrameOfGame_Internal();
-    }
+    /* LLE-only (HLE removed 2026-07-19). The hand-written HLE frame driver
+     * crashed during early gameplay (M/X width claim mismatch); LLE is the
+     * committed correctness floor, so the faithful $00:8034 scheduler is the
+     * one and only per-frame path now. */
+    waiting_for_vblank = 0xFF;
+    interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
   }
   ZeldaRestoreMainCpuAbi();
   cpu_trace_px_breadcrumb(&g_cpu, 0x2003, "after_Internal");

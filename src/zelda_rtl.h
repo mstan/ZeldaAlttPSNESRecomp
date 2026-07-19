@@ -4,7 +4,6 @@
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
 
-void RunOneFrameOfGame_Internal(void);
 void ZeldaDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
 
