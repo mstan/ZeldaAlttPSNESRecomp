@@ -77,8 +77,15 @@ step "Regenerating banks"
 # The LLE-first emitter publishes a complete staging directory atomically. It
 # also removes legacy title-prefixed units from staging before publication, so
 # a failed regeneration cannot leave the live output half-updated.
+# --cfg-roots is the static-coverage policy (mirrors MegamanX/SMW): every
+# declared `func` seeds the analysis closure so the proven surface is
+# materialized as AOT; the interpreter is a failsafe for the unprovable
+# remainder, never the plan of record for known code. Verified 2026-07-20:
+# 4597 AOT variants, clean attract, 0 unresolved / dispatch misses, no crash.
+# The historical "AOT promotion crashes Zelda" was resolved by PR #6's decoder
+# rewrite.
 "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
-    --cfg-dir recomp --out-dir src/gen \
+    --cfg-dir recomp --out-dir src/gen --cfg-roots \
     --analysis-backend "$ANALYSIS_BACKEND"
 
 step "Syncing funcs.h"
@@ -90,7 +97,7 @@ if [ "$STRICT_IDEMPOTENT" -eq 1 ]; then
   TMP_GEN="$(mktemp -d)"
   trap 'rm -rf "$TMP_GEN"' EXIT
   "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
-      --cfg-dir recomp --out-dir "$TMP_GEN" \
+      --cfg-dir recomp --out-dir "$TMP_GEN" --cfg-roots \
       --analysis-backend "$ANALYSIS_BACKEND"
   "$PYTHON" snesrecomp/tools/v2_compare_output.py \
       --expected src/gen --actual "$TMP_GEN"
