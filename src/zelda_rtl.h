@@ -4,7 +4,6 @@
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
 
-void RunOneFrameOfGame_Internal(void);
 void ZeldaDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
 
@@ -13,5 +12,9 @@ void RunOneFrameOfGame(void);
 // RtlDrawPpuFrame only while widescreen is active. Reimplemented from snesrev's
 // zelda3 ConfigurePpuSideSpace (MIT); see IMPROVEMENTS.md / attribution.
 void ZeldaConfigurePpuSideSpace(void);
+
+// Replaces Sprite_PrepOamCoordOrDoubleRet's stock horizontal Carry result
+// with bounds expanded by the current adaptive framebuffer margin.
+void ZeldaAdjustSpritePrepHorizontalCull(CpuState *cpu);
 
 #endif  // ZELDA_RTL_H_

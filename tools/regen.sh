@@ -88,6 +88,10 @@ step "Regenerating banks"
     --cfg-dir recomp --out-dir src/gen --cfg-roots \
     --analysis-backend "$ANALYSIS_BACKEND"
 
+# Generated game code performs the stock 256-wide sprite draw cull. Expand its
+# horizontal comparison to the adaptive viewport after every regeneration.
+"$PYTHON" tools/apply_widescreen_overrides.py --gen-dir src/gen
+
 step "Syncing funcs.h"
 "$PYTHON" snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp \
     --out recomp/funcs.h
@@ -99,6 +103,7 @@ if [ "$STRICT_IDEMPOTENT" -eq 1 ]; then
   "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
       --cfg-dir recomp --out-dir "$TMP_GEN" --cfg-roots \
       --analysis-backend "$ANALYSIS_BACKEND"
+  "$PYTHON" tools/apply_widescreen_overrides.py --gen-dir "$TMP_GEN"
   "$PYTHON" snesrecomp/tools/v2_compare_output.py \
       --expected src/gen --actual "$TMP_GEN"
 fi
