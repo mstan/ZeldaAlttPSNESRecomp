@@ -74,10 +74,11 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs);
 bool g_new_ppu = true;
 
 // Widescreen master switch — storage lives per-game (declared extern in the
-// runner's widescreen.h). g_ws_extra = extra columns per side (0 = off);
-// g_ws_active = (g_ws_extra > 0). Set once from config in the setup path below.
+// runner's widescreen.h). In adaptive mode these describe the current drawable
+// aspect and can change while the window is being resized.
 bool g_ws_active = false;
 int g_ws_extra = 0;
+static bool g_ws_adaptive_enabled = false;
 
 struct SpcPlayer *g_spc_player;
 
@@ -463,8 +464,9 @@ static bool SdlRenderer_Init(SDL_Window *window) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 
   int tex_mult = 1;
+  int texture_width = g_ws_adaptive_enabled ? kPpuBufWidth : g_snes_width;
   g_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                                g_snes_width * tex_mult, g_snes_height * tex_mult);
+                                texture_width * tex_mult, g_snes_height * tex_mult);
   if (g_texture == NULL) {
     printf("Failed to create texture: %s\n", SDL_GetError());
     return false;
@@ -511,6 +513,54 @@ static const struct RendererFuncs kSdlRendererFuncs = {
   &SdlRenderer_BeginDraw,
   &SdlRenderer_EndDraw,
 };
+
+// Match Minish Cap's resize-driven policy: preserve the authentic logical
+// height and derive horizontal world coverage from the live drawable aspect.
+// The PPU has a symmetric border, so round directly to the nearest per-side
+// pixel. kWsExtraMax is the sprite-safe 9-bit OAM ceiling.
+static int AdaptiveWidescreenExtraForSize(int drawable_width,
+                                          int drawable_height) {
+  if (drawable_width <= 0 || drawable_height <= 0)
+    return g_ws_extra;
+
+  int64_t numerator = (int64_t)drawable_width * 224 -
+                      (int64_t)drawable_height * 256;
+  if (numerator <= 0)
+    return 0;
+
+  int64_t divisor = (int64_t)drawable_height * 2;
+  int64_t extra = (numerator + divisor / 2) / divisor;
+  return extra > kWsExtraMax ? kWsExtraMax : (int)extra;
+}
+
+static void UpdateAdaptiveWidescreen(void) {
+  if (!g_ws_adaptive_enabled)
+    return;
+
+  int drawable_width = 0, drawable_height = 0;
+  g_renderer_funcs.GetOutputSize(&drawable_width, &drawable_height);
+  int extra = AdaptiveWidescreenExtraForSize(drawable_width, drawable_height);
+  if (extra == g_ws_extra)
+    return;
+
+  g_ws_extra = extra;
+  g_ws_active = extra > 0;
+  g_snes_width = 256 + 2 * extra;
+
+  // The PPU and host surface both use the live logical row width. The backing
+  // arrays/SDL texture retain maximum capacity, so this is allocation-free.
+  // Reset the live margins before changing pitch: turbo frames bypass the
+  // normal per-game policy wrapper, and must never render an old wider margin
+  // into a newly narrowed row.
+  PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
+  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4, 0);
+  if (g_renderer && !g_config.ignore_aspect_ratio)
+    SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
+
+  host_report_breadcrumb("adaptive widescreen: drawable=%dx%d logical=%dx%d extra=%d",
+                         drawable_width, drawable_height,
+                         g_snes_width, g_snes_height, g_ws_extra);
+}
 
 
 void MkDir(const char *s) {
@@ -751,9 +801,9 @@ int main(int argc, char** argv) {
       g_config.output_method, g_config.new_renderer, g_config.window_scale,
       g_config.fullscreen, g_config.enable_audio, g_config.audio_freq,
       g_config.audio_samples, g_config.skip_launcher);
-  host_report_breadcrumb("widescreen: %s (extra=%d per side) msu1=%d",
+  host_report_breadcrumb("adaptive widescreen: %s msu1=%d",
                          g_config.widescreen ? "on" : "off",
-                         (int)g_config.widescreen, g_config.msu1_enabled);
+                         g_config.msu1_enabled);
 
   /* Resolve the SNES ROM path: argv[0] -> rom.cfg cache -> file picker.
    * On success, replace argv so the existing ReadWholeFile + oracle init
@@ -831,7 +881,12 @@ int main(int argc, char** argv) {
         ls.fullscreen    = g_config.fullscreen;
         ls.ignore_aspect = g_config.ignore_aspect_ratio;
         ls.linear_filter = g_config.linear_filtering;
+#if defined(RECOMP_LAUNCHER)
+        ls.widescreen    = 0;
+        ls.adaptive_view = (g_config.widescreen != 0);
+#else
         ls.widescreen    = (g_config.widescreen != 0);
+#endif
         ls.widescreen_hud= 1;   /* Zelda has no separate HUD-split flag */
         ls.enable_audio  = g_config.enable_audio;
         ls.audio_freq    = g_config.audio_freq;
@@ -860,7 +915,8 @@ int main(int argc, char** argv) {
         RecompLauncherCGameInfo gi;
         memset(&gi, 0, sizeof(gi));
         /* SNES system identity (theme=CRT, platform="SUPER NINTENDO", rom_noun
-         * "ROM", widescreen_supported=1); Zelda overrides the per-game
+         * "ROM"); Zelda replaces the profile's fixed-16:9 capability with
+         * adaptive view below, then overrides the remaining per-game
          * specifics below. One profile call keeps the identity from drifting
          * across SNES titles, exactly as the PSX host does for its. */
         launcher_profile_apply("snes", &gi);
@@ -874,7 +930,12 @@ int main(int argc, char** argv) {
         gi.num_players = 1;               /* single active controller (no P2 row) */
         gi.expected_crc = 0x777AAC2Fu;   /* US 1.0, unheadered 1 MiB (matches kZeldaKnownHashes[0]) */
         gi.has_expected_crc = 1;
+#if defined(RECOMP_LAUNCHER)
+        gi.widescreen_supported = 0;
+        gi.adaptive_view_supported = 1;
+#else
         gi.widescreen_supported = 1;
+#endif
         gi.known_sha256 = kZeldaKnownHashes;     /* stock + MSU-patched */
         gi.num_known_sha256 = 2;
         /* MSU-1: build is recompiled from qwertymodo's ALttP MSU-1 patch (driver
@@ -905,7 +966,11 @@ int main(int argc, char** argv) {
           g_config.fullscreen          = (uint8)ls.fullscreen;
           g_config.ignore_aspect_ratio = ls.ignore_aspect != 0;
           g_config.linear_filtering    = ls.linear_filter != 0;
-          g_config.widescreen          = ls.widescreen ? 71 : 0;   /* ~16:9 */
+#if defined(RECOMP_LAUNCHER)
+          g_config.widescreen          = ls.adaptive_view ? 1 : 0;
+#else
+          g_config.widescreen          = ls.widescreen ? 1 : 0;
+#endif
           g_config.enable_audio        = true;   /* always on; MSU-1 is the mode toggle */
           g_config.audio_freq          = (uint16)ls.audio_freq;
           g_config.enable_gamepad[0]   = ls.player_src[0] == 2;
@@ -996,20 +1061,20 @@ int main(int argc, char** argv) {
   }
 
   g_gamepad[0].joystick_id = g_gamepad[1].joystick_id = -1;
-  // Widescreen capacity from config (extra columns per side; 0 = authentic).
-  // g_ws_extra/g_ws_active live in the shared runner asset (widescreen.c) so
-  // the PPU, the present helper, and the injected game-logic snippets all read
-  // one canonical master switch. Default off => byte-identical faithful build.
-  g_ws_extra = IntMin((int)g_config.widescreen, kWsExtraMax);
-  g_ws_active = (g_ws_extra > 0);
-  g_snes_width = 256 + 2 * g_ws_extra;
+  // Widescreen is resize-driven. Start at the authentic width; once the host
+  // window exists its live drawable aspect selects 0..kWsExtraMax columns per
+  // side. Default off remains the byte-identical 256-wide faithful build.
+  g_ws_adaptive_enabled = g_config.widescreen != 0;
+  g_ws_extra = 0;
+  g_ws_active = false;
+  g_snes_width = 256;
   g_snes_height = 224;// (g_config.extend_y ? 240 : 224);
   // A wider viewport can expose more sprites on one scanline than the SNES
   // could see at 256px. Keep authentic caps configurable at 4:3, but lift them
   // whenever widescreen is active so sprites do not disappear prematurely.
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
     g_config.extend_y * kPpuRenderFlags_Height240 |
-    (g_config.no_sprite_limits || g_ws_active) *
+    (g_config.no_sprite_limits || g_ws_adaptive_enabled) *
       kPpuRenderFlags_NoSpriteLimits;
 
   if (g_config.fullscreen == 1)
@@ -1133,6 +1198,8 @@ error_reading:;
   host_report_breadcrumb("renderer initialized: %s",
       g_config.output_method == kOutputMethod_OpenGL ? "opengl" :
       g_config.output_method == kOutputMethod_SDLSoftware ? "sdl-software" : "sdl");
+
+  UpdateAdaptiveWidescreen();
 
   // Build the present-time color LUT from SNESRECOMP_SCREEN (default raw = off).
   snes_color_lut_setup();
@@ -1286,6 +1353,10 @@ error_reading:;
         break;
       }
     }
+
+    // Poll the renderer instead of relying on backend-specific resize events.
+    // This also follows fullscreen/display and HiDPI drawable changes.
+    UpdateAdaptiveWidescreen();
 
     if (g_paused != audiopaused) {
       audiopaused = g_paused;

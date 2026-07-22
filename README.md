@@ -99,6 +99,21 @@ System shortcuts (configured in `config.ini`'s `[KeyMap]` section):
 | Toggle fullscreen    | Alt+Enter |
 | Turbo (fast-forward) | Tab |
 
+## Adaptive widescreen
+
+Enable **Adaptive view** in the launcher, or set `Widescreen = 1` under
+`[Graphics]` in `config.ini`. The logical height remains 224 pixels while the
+logical width follows the live window or fullscreen aspect ratio. Resizing a
+window wider therefore reveals more of the overworld or dungeon instead of
+stretching a fixed 16:9 image. At the native aspect the renderer returns to the
+authentic 256-pixel view; at 16:9 it is about 398 pixels wide.
+
+The status HUD's left and right groups remain anchored to their respective
+edges. Room bounds still win over the requested width, so areas without valid
+terrain pillarbox rather than exposing wrapped tile data. The maximum logical
+width is 446 pixels because wider views cannot represent every sprite safely in
+the SNES's 9-bit OAM coordinate space.
+
 ## Building from source
 
 Prerequisites: Windows 10+, Visual Studio 2022 (with C++ desktop

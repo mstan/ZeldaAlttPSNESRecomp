@@ -4,7 +4,6 @@
 #include <string.h>
 #include <SDL.h>
 #include "util.h"
-#include "widescreen.h"  // kWsExtraMax
 
 enum {
   kKeyMod_ScanCode = 0x200,
@@ -351,11 +350,10 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "NoSpriteLimits")) {
       return ParseBool(value, &g_config.no_sprite_limits);
     } else if (StringEqualsNoCase(key, "Widescreen")) {
-      // Extra columns per side. Clamp to the OAM 9-bit representational max.
+      // Adaptive widescreen enable. Legacy positive per-side values (notably
+      // Widescreen=71) remain accepted and migrate naturally to enabled.
       long v = strtol(value, (char**)NULL, 10);
-      if (v < 0) v = 0;
-      if (v > kWsExtraMax) v = kWsExtraMax;
-      g_config.widescreen = (uint8)v;
+      g_config.widescreen = v > 0;
       return true;
     } else if (StringEqualsNoCase(key, "Shader")) {
       g_config.shader = *value ? value : NULL;
@@ -589,7 +587,7 @@ void WriteConfigFile(const char *filename) {
   };
   const int N = (int)countof(kvs);
   snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.window_scale ? g_config.window_scale : 3);
-  snprintf(kvs[1].val, sizeof(kvs[1].val), "%d", (int)g_config.widescreen);  /* 0 or ~71 */
+  snprintf(kvs[1].val, sizeof(kvs[1].val), "%d", g_config.widescreen ? 1 : 0);
   snprintf(kvs[2].val, sizeof(kvs[2].val), "%d", g_config.linear_filtering ? 1 : 0);
   snprintf(kvs[3].val, sizeof(kvs[3].val), "%d", g_config.enable_audio ? 1 : 0);
   snprintf(kvs[4].val, sizeof(kvs[4].val), "%d", g_config.audio_freq);

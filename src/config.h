@@ -50,9 +50,9 @@ typedef struct Config {
   bool autosave;
   bool extend_y;
   bool no_sprite_limits;
-  // Widescreen: extra columns rendered per side (0 = authentic 256-wide, off).
-  // Internal width becomes 256 + 2*widescreen; clamped to kWsExtraMax (95).
-  // ~71 ≈ 16:9 at 224 lines. Opt-in enhancement, default off.
+  // Adaptive widescreen enable. Logical width follows the live host aspect at
+  // a fixed 224-line height, up to the sprite-safe 446px ceiling. Legacy
+  // positive numeric values remain accepted as enabled. Default off.
   uint8 widescreen;
   bool display_perf_title;
 

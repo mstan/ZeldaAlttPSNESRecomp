@@ -176,15 +176,22 @@ void ZeldaConfigurePpuSideSpace(void) {
   // ~scanline 63, so the split band is 64px tall to keep the whole bar in one
   // piece rather than vertically clipping it. Only during
   // actual gameplay (overworld 9 / dungeon 7), where BG3 shows just the status
-  // strip; disabled in menus / the full inventory panel (main_module 14) so
-  // those render normally. The PPU primitive also self-disables on any frame
+  // strip. Module 14/submodule 2 is the text renderer layered over the saved
+  // gameplay module, so retain the split there; other interface states such as
+  // dungeon/world maps and item menus render normally. The PPU primitive also
+  // self-disables on any frame
   // BG3 carries a real window (e.g. transition irises). Entirely BG3 tiles —
   // no OAM elements in the bar, so nothing is left behind. (snesrev/zelda3 +
   // xander-haj/Z3R HUD-rearrange concept; see IMPROVEMENTS.md.)
-  if (main_module == 7 || main_module == 9)
+  bool gameplay_hud = main_module == 7 || main_module == 9 ||
+      (main_module == 14 && submodule == 2 && (mod == 7 || mod == 9));
+  if (gameplay_hud) {
     PpuSetWidescreenHudSplit(g_ppu, 64, 64, 160);
-  else
+    PpuSetWidescreenHudAlwaysVisible(g_ppu, true);
+  } else {
     PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0);
+    PpuSetWidescreenHudAlwaysVisible(g_ppu, false);
+  }
   // --- end Tier D HUD split -----------------------------------------------
 }
 
