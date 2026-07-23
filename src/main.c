@@ -32,7 +32,7 @@
 #include "recomp_launcher.h"   /* recomp_launcher_run_window() */
 #include "launcher_profile.h"  /* launcher_profile_apply("snes", &gi) — SNES identity */
 #elif defined(SNES_LAUNCHER)
-#include "launcher_capi.h"   /* shared RmlUi pre-boot launcher (snes_launcher_run_window) */
+#include "launcher_capi.h"   /* shared pre-boot launcher (snes_launcher_run_window) */
 #endif
 #endif
 #include "zelda_spc_player.h"
