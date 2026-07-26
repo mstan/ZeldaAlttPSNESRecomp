@@ -51,6 +51,7 @@ add_executable(ZeldaALttPSNESRecomp
     src/zelda_00.c
     src/gen_stubs.c
     src/zelda_cpu_infra.c
+    src/zelda_parallax.c
     src/zelda_rtl.c
     src/zelda_spc_player.c
 

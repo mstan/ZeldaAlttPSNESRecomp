@@ -46,6 +46,16 @@
 #include "keybinds.h"
 #include "host_report.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, kWsExtraMax, RtlWidescreenPresent
+#include "parallax.h"
+#include "zelda_parallax.h"
+
+/* Set in main once the config path is resolved; read by zelda_parallax.c so
+ * its toggle persists to the same exe-anchored file every other
+ * WriteConfigFile call here targets (config_file is a local in main). */
+static const char *g_zelda_parallax_config_path;
+const char *ZeldaParallax_ConfigPath(void) {
+  return g_zelda_parallax_config_path;
+}
 #include "snes/color_lut.h"  // opt-in present-time CRT color LUT (SNESRECOMP_SCREEN)
 
 typedef struct GamepadInfo {
@@ -350,6 +360,10 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     // the real edge is ever shown. Off-policy screens collapse to pillarbox.
     ZeldaConfigurePpuSideSpace();
   }
+  /* LAST of the per-frame PPU policy: the parallax captures are full-frame
+   * RemoveFromGame captures that override any narrower overlay policy for the
+   * same source, so they are declared after everything else has had its say. */
+  ZeldaParallax_PrepareFrame(g_snes_width, g_snes_height, g_ws_extra);
   g_rtl_game_info->draw_ppu_frame();
   RtlWidescreenPresent(pixel_buffer, pitch, g_my_pixels, g_snes_width, g_snes_height);
   // Present-time color grading (opt-in, SNESRECOMP_SCREEN=crt|trinitron; default
@@ -501,8 +515,33 @@ static void SdlRenderer_EndDraw(void) {
   //  uint64 after = SDL_GetPerformanceCounter();
   //  float v = (double)(after - before) / SDL_GetPerformanceFrequency();
   //  printf("%f ms\n", v * 1000);
+  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   SDL_RenderClear(g_renderer);
-  SDL_RenderCopy(g_renderer, g_texture, &g_sdl_renderer_rect, NULL);
+  /* Parallax composite. Zelda delegates letterboxing to
+   * SDL_RenderSetLogicalSize, which would also render the composited scene at
+   * 256x224 and upscale it — soft, and it discards the point of projecting at
+   * output resolution. Drop logical presentation for this pass, composite into
+   * the equivalent rect in real output pixels, then restore it.
+   *
+   * Returning false is the normal path for every non-world frame; fall back to
+   * the flat blit so a failure is never a black screen. */
+  bool composited = false;
+  if (Parallax_IsActiveThisFrame()) {
+    int out_w = 0, out_h = 0;
+    if (SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h) == 0 &&
+        out_w > 0 && out_h > 0) {
+      SDL_RenderSetLogicalSize(g_renderer, 0, 0);
+      SDL_Rect dest;
+      Parallax_LetterboxViewport(out_w, out_h, g_snes_width, g_snes_height,
+                                 g_config.ignore_aspect_ratio, &dest);
+      composited = Parallax_Composite(g_renderer, &dest, g_my_pixels,
+                                      g_snes_width, g_snes_height);
+      if (!g_config.ignore_aspect_ratio)
+        SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
+    }
+  }
+  if (!composited)
+    SDL_RenderCopy(g_renderer, g_texture, &g_sdl_renderer_rect, NULL);
   SDL_RenderPresent(g_renderer); // vsyncs to 60 FPS?
 }
 
@@ -795,6 +834,9 @@ int main(int argc, char** argv) {
       ParseConfigFile("config.local.ini");
     }
   }
+  g_zelda_parallax_config_path = config_file;
+  /* After BOTH config passes so config.local.ini's override is honoured. */
+  ZeldaParallax_Init();
   host_report_breadcrumb(
       "config parsed: output=%d new_renderer=%d scale=%d fullscreen=%d "
       "audio=%d freq=%d samples=%d skip_launcher=%d",
@@ -1624,6 +1666,9 @@ static void HandleCommand(uint32 j, bool pressed) {
       g_ppu_render_flags ^= kPpuRenderFlags_NewRenderer;
       printf("New renderer = %x\n", g_ppu_render_flags & kPpuRenderFlags_NewRenderer);
       g_new_ppu = (g_ppu_render_flags & kPpuRenderFlags_NewRenderer) != 0;
+      break;
+    case kKeys_ToggleParallax:
+      ZeldaParallax_Toggle();
       break;
     case kKeys_VolumeUp:
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;

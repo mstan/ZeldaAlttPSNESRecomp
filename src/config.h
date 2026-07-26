@@ -25,6 +25,9 @@ enum {
   kKeys_ToggleRenderer,
   kKeys_VolumeUp,
   kKeys_VolumeDown,
+  /* Appended at the END: kDefaultKbdControls (config.c) is a POSITIONAL table
+   * parallel to this enum, so a mid-list insert shifts every later binding. */
+  kKeys_ToggleParallax,
   kKeys_Total,
 };
 
@@ -54,6 +57,10 @@ typedef struct Config {
   // a fixed 224-line height, up to the sprite-safe 446px ceiling. Legacy
   // positive numeric values remain accepted as enabled. Default off.
   uint8 widescreen;
+  /* Layered pseudo-3D parallax presenter (snesrecomp/docs/PARALLAX.md).
+   * Top-down tabletop tilt for ALttP. Default ON while being evaluated;
+   * requires the SDL renderer (OpenGL presents flat). */
+  bool parallax;
   bool display_perf_title;
 
   // Skip the per-frame SDL_Delay pacing. Off by default (pacing on) so SPC +

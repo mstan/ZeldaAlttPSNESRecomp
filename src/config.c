@@ -34,6 +34,8 @@ static const uint16 kDefaultKbdControls[kKeys_Total] = {
   A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), N, N, _(SDLK_f), _(SDLK_r),
   // VolumeUp VolumeDown
   0, 0,
+  // ToggleParallax
+  A(SDLK_p),
 };
 #undef _
 #undef A
@@ -54,6 +56,7 @@ static const KeyNameId kKeyNameId[] = {
   M(Load), M(Save),
   S(Fullscreen), S(Reset),
   S(Pause), S(PauseDimmed), S(Turbo), S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
+  S(ToggleParallax),
 };
 #undef S
 #undef M
@@ -349,6 +352,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.linear_filtering);
     } else if (StringEqualsNoCase(key, "NoSpriteLimits")) {
       return ParseBool(value, &g_config.no_sprite_limits);
+    } else if (StringEqualsNoCase(key, "Parallax")) {
+      return ParseBool(value, &g_config.parallax);
     } else if (StringEqualsNoCase(key, "Widescreen")) {
       // Adaptive widescreen enable. Legacy positive per-side values (notably
       // Widescreen=71) remain accepted and migrate naturally to enabled.
@@ -431,6 +436,9 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 
 void ParseConfigFile(const char *filename) {
   g_config.enable_audio = true;
+  /* Parallax defaults ON for this evaluation build so a freshly-extracted
+   * release shows the effect without editing an ini. Alt+P toggles. */
+  g_config.parallax = true;
   /* Audio defaults match the values shipped in config.ini's [Sound]
    * section. Without these a release with no config.ini next to the
    * exe leaves audio_freq/audio_channels/audio_samples at 0, which
@@ -584,6 +592,8 @@ void WriteConfigFile(const char *filename) {
     { "GamepadMap", "EnableGamepad2" },
     { "General",    "SkipLauncher" },
     { "GamepadMap", "GamepadDeadzone" },
+    /* Appended at the END: the value assignments below are index-coupled. */
+    { "Graphics", "Parallax" },
   };
   const int N = (int)countof(kvs);
   snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.window_scale ? g_config.window_scale : 3);
@@ -597,6 +607,7 @@ void WriteConfigFile(const char *filename) {
   snprintf(kvs[8].val, sizeof(kvs[8].val), "%s", g_config.enable_gamepad[1] ? "true" : "false");
   snprintf(kvs[9].val, sizeof(kvs[9].val), "%d", g_config.skip_launcher ? 1 : 0);
   snprintf(kvs[10].val, sizeof(kvs[10].val), "%d", g_config.gamepad_deadzone);
+  snprintf(kvs[11].val, sizeof(kvs[11].val), "%d", g_config.parallax ? 1 : 0);
 
   char *data = NULL;
   long sz = 0;
