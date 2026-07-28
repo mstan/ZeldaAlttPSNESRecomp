@@ -48,7 +48,6 @@ typedef struct Config {
   uint8 audio_channels;
   uint16 audio_samples;
   bool autosave;
-  bool extend_y;
   bool no_sprite_limits;
   // Adaptive widescreen enable. Logical width follows the live host aspect at
   // a fixed 224-line height, up to the sprite-safe 446px ceiling. Legacy
