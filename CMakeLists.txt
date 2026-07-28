@@ -44,7 +44,6 @@ add_executable(ZeldaALttPSNESRecomp
     ${SNESRECOMP_RUNNER_SOURCES}
     # game-specific runtime
     src/config.c
-    src/glsl_shader.c
     src/main.c
     src/post_mortem.c
     src/opengl.c
@@ -73,6 +72,7 @@ target_include_directories(ZeldaALttPSNESRecomp PRIVATE
     ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
 )
+snesrecomp_target_glsl_shader(ZeldaALttPSNESRecomp)
 
 # prod-vs-debug via the single SNESRECOMP_ENABLE_TRACE switch (runner.cmake,
 # default OFF). Prod: no debug_server.c / TCP server / rings. Debug:
@@ -99,7 +99,6 @@ endif()
 target_link_libraries(ZeldaALttPSNESRecomp PRIVATE
     ${SDL2_LIBRARIES}
     OpenGL::GL
-    m                                 # libm: glsl_shader.c uses pow() (implicit on macOS)
 )
 
 if(WIN32)
