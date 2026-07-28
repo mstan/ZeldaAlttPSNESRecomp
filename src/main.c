@@ -71,8 +71,6 @@ static void HandleInput(int keyCode, int keyMod, bool pressed);
 static void HandleCommand(uint32 j, bool pressed);
 void OpenGLRenderer_Create(struct RendererFuncs *funcs);
 
-bool g_new_ppu = true;
-
 // Widescreen master switch — storage lives per-game (declared extern in the
 // runner's widescreen.h). In adaptive mode these describe the current drawable
 // aspect and can change while the window is being resized.
@@ -553,7 +551,8 @@ static void UpdateAdaptiveWidescreen(void) {
   // normal per-game policy wrapper, and must never render an old wider margin
   // into a newly narrowed row.
   PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
-  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4, 0);
+  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4,
+                  g_ppu_render_flags);
   if (g_renderer && !g_config.ignore_aspect_ratio)
     SDL_RenderSetLogicalSize(g_renderer, g_snes_width, g_snes_height);
 
@@ -1253,7 +1252,8 @@ error_reading:;
 
   // Pitch tracks the widescreen capacity (g_snes_width == 256 when off, so this
   // is the authentic 256*4 stride unless widescreen is active).
-  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4, 0);
+  PpuBeginDrawing(g_ppu, g_my_pixels, g_snes_width * 4,
+                  g_ppu_render_flags);
 
   MkDir("saves");
     
@@ -1623,7 +1623,6 @@ static void HandleCommand(uint32 j, bool pressed) {
     case kKeys_ToggleRenderer:
       g_ppu_render_flags ^= kPpuRenderFlags_NewRenderer;
       printf("New renderer = %x\n", g_ppu_render_flags & kPpuRenderFlags_NewRenderer);
-      g_new_ppu = (g_ppu_render_flags & kPpuRenderFlags_NewRenderer) != 0;
       break;
     case kKeys_VolumeUp:
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;
