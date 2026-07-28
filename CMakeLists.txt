@@ -45,7 +45,6 @@ add_executable(ZeldaALttPSNESRecomp
     # game-specific runtime
     src/config.c
     src/main.c
-    src/post_mortem.c
     src/opengl.c
     src/zelda_00.c
     src/gen_stubs.c
@@ -72,6 +71,7 @@ target_include_directories(ZeldaALttPSNESRecomp PRIVATE
     ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
 )
+snesrecomp_target_post_mortem(ZeldaALttPSNESRecomp)
 snesrecomp_target_glsl_shader(ZeldaALttPSNESRecomp)
 
 # prod-vs-debug via the single SNESRECOMP_ENABLE_TRACE switch (runner.cmake,
@@ -103,5 +103,5 @@ target_link_libraries(ZeldaALttPSNESRecomp PRIVATE
 
 if(WIN32)
     # Trace/debug-server sockets and post-mortem symbolization.
-    target_link_libraries(ZeldaALttPSNESRecomp PRIVATE ws2_32 dbghelp)
+    target_link_libraries(ZeldaALttPSNESRecomp PRIVATE ws2_32)
 endif()
