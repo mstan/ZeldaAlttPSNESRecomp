@@ -31,7 +31,8 @@ done
 cd "$ROOT"
 
 ROM="zelda.sfc"
-TESTS="snesrecomp/tests/run_tests.py"
+SNESRECOMP_ROOT="${SNESRECOMP_ROOT:-snesrecomp}"
+TESTS="$SNESRECOMP_ROOT/tests/run_tests.py"
 
 # Python interpreter: prefer python3 (macOS / most Linux have no bare `python`).
 PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
@@ -55,7 +56,7 @@ esac
 
 if [ "$ANALYSIS_BACKEND" = native ]; then
   step "Building native analyzer"
-  "$PYTHON" snesrecomp/tools/build_native_analyzer.py
+  "$PYTHON" "$SNESRECOMP_ROOT/tools/build_native_analyzer.py"
 fi
 
 # MSU-1: the build is recompiled from an MSU-1-patched ROM (the patch injects
@@ -84,7 +85,7 @@ step "Regenerating banks"
 # 4597 AOT variants, clean attract, 0 unresolved / dispatch misses, no crash.
 # The historical "AOT promotion crashes Zelda" was resolved by PR #6's decoder
 # rewrite.
-"$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
+"$PYTHON" "$SNESRECOMP_ROOT/tools/v2_emit.py" --rom "$GEN_ROM" \
     --cfg-dir recomp --out-dir src/gen --cfg-roots \
     --analysis-backend "$ANALYSIS_BACKEND"
 
@@ -93,18 +94,18 @@ step "Regenerating banks"
 "$PYTHON" tools/apply_widescreen_overrides.py --gen-dir src/gen
 
 step "Syncing funcs.h"
-"$PYTHON" snesrecomp/tools/v2_sync_funcs_h.py --cfg-dir recomp \
+"$PYTHON" "$SNESRECOMP_ROOT/tools/v2_sync_funcs_h.py" --cfg-dir recomp \
     --out recomp/funcs.h
 
 if [ "$STRICT_IDEMPOTENT" -eq 1 ]; then
   step "Idempotency check: regen into temp dir + byte-compare"
   TMP_GEN="$(mktemp -d)"
   trap 'rm -rf "$TMP_GEN"' EXIT
-  "$PYTHON" snesrecomp/tools/v2_emit.py --rom "$GEN_ROM" \
+  "$PYTHON" "$SNESRECOMP_ROOT/tools/v2_emit.py" --rom "$GEN_ROM" \
       --cfg-dir recomp --out-dir "$TMP_GEN" --cfg-roots \
       --analysis-backend "$ANALYSIS_BACKEND"
   "$PYTHON" tools/apply_widescreen_overrides.py --gen-dir "$TMP_GEN"
-  "$PYTHON" snesrecomp/tools/v2_compare_output.py \
+  "$PYTHON" "$SNESRECOMP_ROOT/tools/v2_compare_output.py" \
       --expected src/gen --actual "$TMP_GEN"
 fi
 
