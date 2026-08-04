@@ -1,6 +1,7 @@
 /*
- * ALTTP voxel-orbit experiment. The renderer is presentation-only; this file
- * owns Zelda-specific visibility, height policy, and live camera controls.
+ * ALTTP first-person voxel experiment. The renderer is presentation-only;
+ * this file also maps view-relative movement back onto Zelda's four native
+ * directional input bits before each emulated frame.
  */
 #include "zelda_voxel.h"
 
@@ -18,11 +19,14 @@
 static int s_initialized;
 static int s_enabled = 1;
 static int s_view_enabled = 1;
-static float s_pitch = 38.0f, s_yaw = -22.0f, s_roll;
+static int s_heading_initialized;
+static int s_last_mapped_direction;
+static float s_heading = -90.0f;
+static float s_pitch, s_yaw, s_roll;
 static float s_distance = 285.0f;
-static float s_render_pitch = 38.0f, s_render_yaw = -22.0f, s_render_roll;
+static float s_render_pitch, s_render_yaw, s_render_roll;
 static float s_render_distance = 285.0f;
-static float s_right_x, s_right_y;
+static float s_left_x, s_left_y, s_right_x, s_right_y;
 
 static int clamp_int(int value, int low, int high) {
   if (value < low) return low;
@@ -34,6 +38,11 @@ static float clamp_float(float value, float low, float high) {
   if (value < low) return low;
   if (value > high) return high;
   return value;
+}
+
+static uint16_t read_wram16(unsigned address) {
+  return (uint16_t)(g_ram[address] |
+                    ((uint16_t)g_ram[address + 1] << 8));
 }
 
 static float ease(float current, float target) {
@@ -56,14 +65,31 @@ static void initialize_once(void) {
   if (value && (!value[0] || value[0] == '0')) s_enabled = 0;
   s_view_enabled = s_enabled;
   fprintf(stderr,
-          "[Voxel] ALTTP orbit experiment %s "
-          "(Numpad 0 toggles, right stick rotates)\n",
+          "[Voxel] ALTTP first-person experiment %s "
+          "(right stick looks, movement is camera-relative)\n",
           s_enabled ? "enabled" : "disabled");
 }
 
 static int gameplay_visible(void) {
   uint8_t module = g_ram[0x10];
   return module == 7 || module == 9;
+}
+
+static float wrap_heading(float heading) {
+  while (heading > 180.0f) heading -= 360.0f;
+  while (heading < -180.0f) heading += 360.0f;
+  return heading;
+}
+
+static void initialize_heading(void) {
+  if (s_heading_initialized) return;
+  switch (g_ram[0x2f] & 6) {
+    case 0: s_heading = -90.0f; break;
+    case 2: s_heading = 90.0f; break;
+    case 4: s_heading = 180.0f; break;
+    default: s_heading = 0.0f; break;
+  }
+  s_heading_initialized = 1;
 }
 
 static int dungeon_attribute_is_wall(uint8_t attribute) {
@@ -137,11 +163,13 @@ static float zelda_cell_height(const uint32_t *pixels, int stride,
 }
 
 static void update_camera(void) {
-  s_yaw += stick_curve(s_right_x) * 2.8f;
-  if (s_yaw > 180.0f) s_yaw -= 360.0f;
-  if (s_yaw < -180.0f) s_yaw += 360.0f;
-  s_pitch = clamp_float(
-      s_pitch - stick_curve(s_right_y) * 2.1f, 8.0f, 82.0f);
+  if (s_enabled && s_view_enabled && gameplay_visible()) {
+    initialize_heading();
+    s_heading = wrap_heading(
+        s_heading + stick_curve(s_right_x) * 3.5f);
+    s_pitch = clamp_float(
+        s_pitch - stick_curve(s_right_y) * 2.4f, -50.0f, 50.0f);
+  }
   s_render_pitch = ease(s_render_pitch, s_pitch);
   s_render_yaw = ease(s_render_yaw, s_yaw);
   s_render_roll = ease(s_render_roll, s_roll);
@@ -157,12 +185,14 @@ void ZeldaVoxelHandleEvent(const SDL_Event *event) {
     float value = event->caxis.value < 0
                       ? (float)event->caxis.value / 32768.0f
                       : (float)event->caxis.value / 32767.0f;
-    if (event->caxis.axis == SDL_CONTROLLER_AXIS_RIGHTX) s_right_x = value;
+    if (event->caxis.axis == SDL_CONTROLLER_AXIS_LEFTX) s_left_x = value;
+    else if (event->caxis.axis == SDL_CONTROLLER_AXIS_LEFTY) s_left_y = value;
+    else if (event->caxis.axis == SDL_CONTROLLER_AXIS_RIGHTX) s_right_x = value;
     else if (event->caxis.axis == SDL_CONTROLLER_AXIS_RIGHTY) s_right_y = value;
     return;
   }
   if (event->type == SDL_CONTROLLERDEVICEREMOVED) {
-    s_right_x = s_right_y = 0.0f;
+    s_left_x = s_left_y = s_right_x = s_right_y = 0.0f;
     return;
   }
   if (event->type != SDL_KEYDOWN) return;
@@ -173,10 +203,10 @@ void ZeldaVoxelHandleEvent(const SDL_Event *event) {
     case SDL_SCANCODE_KP_0:
       s_view_enabled = !s_view_enabled; changed = 1; break;
     case SDL_SCANCODE_KP_8:
-      s_pitch = (float)clamp_int((int)s_pitch + 5, 8, 82);
+      s_pitch = (float)clamp_int((int)s_pitch + 5, -50, 50);
       changed = 1; break;
     case SDL_SCANCODE_KP_2:
-      s_pitch = (float)clamp_int((int)s_pitch - 5, 8, 82);
+      s_pitch = (float)clamp_int((int)s_pitch - 5, -50, 50);
       changed = 1; break;
     case SDL_SCANCODE_KP_4: s_yaw -= 5.0f; changed = 1; break;
     case SDL_SCANCODE_KP_6: s_yaw += 5.0f; changed = 1; break;
@@ -193,15 +223,17 @@ void ZeldaVoxelHandleEvent(const SDL_Event *event) {
       s_distance = clamp_float(s_distance + 12.0f, 150.0f, 430.0f);
       changed = 1; break;
     case SDL_SCANCODE_KP_5:
-      s_pitch = 38.0f; s_yaw = -22.0f; s_roll = 0.0f;
-      s_distance = 285.0f; changed = 1; break;
+      s_pitch = 0.0f; s_yaw = 0.0f; s_roll = 0.0f;
+      s_distance = 285.0f; s_heading_initialized = 0;
+      changed = 1; break;
     default: break;
   }
   if (changed) {
     while (s_yaw > 180.0f) s_yaw -= 360.0f;
     while (s_yaw < -180.0f) s_yaw += 360.0f;
     fprintf(stderr,
-            "[Voxel] orbit view=%s pitch=%.0f yaw=%.0f roll=%.0f "
+            "[Voxel] first-person view=%s pitch=%.0f yaw-offset=%.0f "
+            "roll=%.0f "
             "distance=%.0f\n",
             s_view_enabled ? "on" : "off", s_pitch, s_yaw, s_roll,
             s_distance);
@@ -209,13 +241,58 @@ void ZeldaVoxelHandleEvent(const SDL_Event *event) {
 }
 
 uint32_t ZeldaVoxelRemapInput(uint32_t input) {
+  float strafe = 0.0f, forward = 0.0f;
+  float magnitude, heading, world_x, world_z;
+  uint32_t directions;
+  int mapped = 0;
   initialize_once();
-  return input;
+  if (!s_enabled || !s_view_enabled || !gameplay_visible()) {
+    s_last_mapped_direction = 0;
+    return input;
+  }
+  initialize_heading();
+  directions = input & 0x0f;
+  magnitude = sqrtf(s_left_x * s_left_x + s_left_y * s_left_y);
+  if (magnitude > 0.25f) {
+    float strength = (magnitude - 0.25f) / 0.75f;
+    if (strength > 1.0f) strength = 1.0f;
+    strafe = s_left_x / magnitude * strength;
+    forward = -s_left_y / magnitude * strength;
+  } else {
+    strafe = ((directions & 0x08) ? 1.0f : 0.0f) -
+             ((directions & 0x04) ? 1.0f : 0.0f);
+    forward = ((directions & 0x01) ? 1.0f : 0.0f) -
+              ((directions & 0x02) ? 1.0f : 0.0f);
+  }
+  if (fabsf(strafe) > 0.01f || fabsf(forward) > 0.01f) {
+    float abs_x, abs_z;
+    heading = (s_heading + s_render_yaw) *
+              3.14159265358979323846f / 180.0f;
+    world_x = cosf(heading) * forward - sinf(heading) * strafe;
+    world_z = sinf(heading) * forward + cosf(heading) * strafe;
+    abs_x = fabsf(world_x);
+    abs_z = fabsf(world_z);
+    if (fabsf(abs_x - abs_z) < 0.10f &&
+        s_last_mapped_direction != 0) {
+      if (s_last_mapped_direction == 4 ||
+          s_last_mapped_direction == 8)
+        mapped = world_x >= 0.0f ? 8 : 4;
+      else
+        mapped = world_z >= 0.0f ? 2 : 1;
+    } else if (abs_x >= abs_z) {
+      mapped = world_x >= 0.0f ? 8 : 4;
+    } else {
+      mapped = world_z >= 0.0f ? 2 : 1;
+    }
+  }
+  s_last_mapped_direction = mapped;
+  return (input & ~0x0fu) | (uint32_t)mapped;
 }
 
 void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
                           int width, int height) {
   SnesVoxelScene scene;
+  float heading, look_pitch, eye_x, eye_z;
   int source_x;
   initialize_once();
   update_camera();
@@ -233,12 +310,32 @@ void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
   scene.source_height = ZELDA_VOXEL_SOURCE_HEIGHT;
   scene.cell_size = 8;
   scene.cell_height = zelda_cell_height;
-  scene.elevation_degrees = s_render_pitch;
-  scene.yaw_degrees = s_render_yaw;
   scene.roll_degrees = s_render_roll;
-  scene.camera_distance = s_render_distance;
-  scene.camera_focal_scale = 0.90f;
-  scene.camera_center_y = 0.61f;
+  initialize_heading();
+  heading = (s_heading + s_render_yaw) *
+            3.14159265358979323846f / 180.0f;
+  look_pitch = s_render_pitch *
+               3.14159265358979323846f / 180.0f;
+  eye_x = (float)(int16_t)(uint16_t)(
+              read_wram16(0x22) - read_wram16(0xe2)) + 8.0f;
+  eye_z = (float)(int16_t)(uint16_t)(
+              read_wram16(0x20) - read_wram16(0xe8)) -
+          ZELDA_VOXEL_SOURCE_Y + 12.0f;
+  eye_x = clamp_float(eye_x, 4.0f, 252.0f);
+  eye_z = clamp_float(eye_z, 4.0f, 188.0f);
+  scene.use_camera_pose = 1;
+  scene.camera_eye_x = eye_x + cosf(heading) * 2.0f;
+  scene.camera_eye_y = 8.0f;
+  scene.camera_eye_z = eye_z + sinf(heading) * 2.0f;
+  scene.camera_look_at_x =
+      scene.camera_eye_x + cosf(heading) * cosf(look_pitch) * 128.0f;
+  scene.camera_look_at_y =
+      scene.camera_eye_y + sinf(look_pitch) * 128.0f;
+  scene.camera_look_at_z =
+      scene.camera_eye_z + sinf(heading) * cosf(look_pitch) * 128.0f;
+  scene.camera_focal_scale =
+      clamp_float(0.78f * 285.0f / s_render_distance, 0.48f, 1.25f);
+  scene.camera_center_y = 0.58f;
   scene.preserve_top_rows = ZELDA_VOXEL_SOURCE_Y;
   scene.sky_top = g_ram[0x10] == 7 ? 0xff10151fu : 0xff243b5au;
   scene.sky_bottom = g_ram[0x10] == 7 ? 0xff4b5360u : 0xff8fb6c6u;
