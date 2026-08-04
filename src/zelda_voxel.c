@@ -30,6 +30,10 @@ static float s_render_distance = 285.0f;
 static float s_left_x, s_left_y, s_right_x, s_right_y;
 static uint32_t s_link_overlay[256 * 240];
 static int s_link_overlay_bound;
+static int8_t s_overworld_height[64 * 64];
+static int8_t s_overworld_candidate[64 * 64];
+static uint8_t s_overworld_votes[64 * 64];
+static uint16_t s_overworld_area = 0xffff;
 
 static int clamp_int(int value, int low, int high) {
   if (value < low) return low;
@@ -142,17 +146,49 @@ static float pixel_material_height(const uint32_t *pixels, int stride,
   return 0.0f;
 }
 
+static float stable_overworld_height(const uint32_t *pixels, int stride,
+                                     int size, uint16_t world_x,
+                                     uint16_t world_y) {
+  uint16_t area = read_wram16(0x8a);
+  int index = ((world_y & 0x1f8) >> 3) * 64 +
+              ((world_x & 0x1f8) >> 3);
+  int8_t candidate =
+      (int8_t)pixel_material_height(pixels, stride, size);
+
+  if (area != s_overworld_area) {
+    memset(s_overworld_height, 0x80, sizeof(s_overworld_height));
+    memset(s_overworld_votes, 0, sizeof(s_overworld_votes));
+    s_overworld_area = area;
+  }
+  if (s_overworld_height[index] != INT8_MIN)
+    return (float)s_overworld_height[index];
+
+  if (!s_overworld_votes[index] ||
+      s_overworld_candidate[index] != candidate) {
+    s_overworld_candidate[index] = candidate;
+    s_overworld_votes[index] = 1;
+  } else if (s_overworld_votes[index] < 3) {
+    s_overworld_votes[index]++;
+  }
+  if (s_overworld_votes[index] >= 3) {
+    s_overworld_height[index] = candidate;
+    return (float)candidate;
+  }
+  return 0.0f;
+}
+
 static float zelda_cell_height(const uint32_t *pixels, int stride,
                                int size, int cell_x, int cell_y,
                                void *user) {
   uint8_t module = g_ram[0x10];
+  uint16_t scroll_x = read_wram16(0x00e2);
+  uint16_t scroll_y = read_wram16(0x00e8);
+  uint16_t world_x =
+      (uint16_t)(scroll_x + cell_x * size + size / 2);
+  uint16_t world_y = (uint16_t)(
+      scroll_y + ZELDA_VOXEL_SOURCE_Y + cell_y * size + size / 2);
   (void)user;
   if (module == 7) {
-    uint16_t scroll_x = *(uint16_t *)(g_ram + 0x00e2);
-    uint16_t scroll_y = *(uint16_t *)(g_ram + 0x00e8);
-    uint16_t world_x = (uint16_t)(scroll_x + cell_x * size + size / 2);
-    uint16_t world_y = (uint16_t)(
-        scroll_y + ZELDA_VOXEL_SOURCE_Y + cell_y * size + size / 2);
     int floor_offset = g_ram[0x00ee] ? 0x1000 : 0;
     int index = floor_offset + ((world_x & 0x1f8) >> 3) +
                 ((world_y & 0x1f8) << 3);
@@ -161,8 +197,12 @@ static float zelda_cell_height(const uint32_t *pixels, int stride,
         (attribute >= 0xb0 && attribute <= 0xbd)) return -4.0f;
     if (attribute == 0x08 || attribute == 0x09) return -2.0f;
     if (dungeon_attribute_is_wall(attribute)) return 12.0f;
+    return 0.0f;
   }
-  return pixel_material_height(pixels, stride, size);
+  if (module == 9)
+    return stable_overworld_height(
+        pixels, stride, size, world_x, world_y);
+  return 0.0f;
 }
 
 static void update_camera(void) {
@@ -318,13 +358,14 @@ void ZeldaVoxelConfigurePpu(void) {
   link_y = (int16_t)(uint16_t)(
       read_wram16(0x20) - read_wram16(0xe8));
 
-  /* Link is assembled from the leading OAM slots. Capture only those slots
-   * inside a tight live rectangle and omit them from the game surface; other
-   * actors and effects remain visible even when their cards cross nearby. */
+  /* ALTTP moves Link's component sprites between OAM regions as equipment and
+   * animation change, so filter spatially across the complete OAM table.
+   * Only pixels inside his tight live body rectangle are omitted; weapon
+   * pixels extending beyond it, enemies, rain, and other effects remain. */
   if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
-                           link_x - 8, link_y - 8, 32, 40,
+                           link_x - 12, link_y - 20, 40, 48,
                            kPpuOverlayFlag_RemoveFromGame))
-    PpuSetOverlayOamRange(g_ppu, 0, 12);
+    PpuSetOverlayOamRange(g_ppu, 0, 128);
 }
 
 void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,

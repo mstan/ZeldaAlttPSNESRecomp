@@ -7,6 +7,9 @@ The final SNES frame is divided into live 8x8 cells, Zelda dungeon collision
 attributes and pixel materials assign their heights, and the shared
 SNESRecomp compositor projects those cells as textured prisms. Title, file
 select, inventory, and other non-gameplay modules remain in the native view.
+Overworld material heights settle per world cell before being retained, so
+animated rain and other transient sprite pixels cannot continually change
+terrain depth.
 
 The camera follows Link's live screen position. The right stick looks
 horizontally and vertically. The left stick, D-pad, and arrow keys move
