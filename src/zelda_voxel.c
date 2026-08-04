@@ -29,11 +29,9 @@ static float s_render_pitch, s_render_yaw, s_render_roll;
 static float s_render_distance = 285.0f;
 static float s_left_x, s_left_y, s_right_x, s_right_y;
 static uint32_t s_link_overlay[256 * 240];
+static uint32_t s_hud_overlay[256 * 240];
 static int s_link_overlay_bound;
-static int8_t s_overworld_height[64 * 64];
-static int8_t s_overworld_candidate[64 * 64];
-static uint8_t s_overworld_votes[64 * 64];
-static uint16_t s_overworld_area = 0xffff;
+static int s_hud_overlay_bound;
 
 static int clamp_int(int value, int low, int high) {
   if (value < low) return low;
@@ -110,70 +108,66 @@ static int dungeon_attribute_is_wall(uint8_t attribute) {
          (attribute >= 0x70 && attribute <= 0xaf);
 }
 
-static float pixel_material_height(const uint32_t *pixels, int stride,
-                                   int size) {
-  int dark = 0, green = 0, edges = 0, luminance_sum = 0;
-  for (int y = 0; y < size; y++) {
-    for (int x = 0; x < size; x++) {
-      uint32_t color = pixels[y * stride + x];
-      int red = (color >> 16) & 0xff;
-      int g = (color >> 8) & 0xff;
-      int blue = color & 0xff;
-      int luminance = (red * 3 + g * 5 + blue * 2) / 10;
-      luminance_sum += luminance;
-      if (luminance < 42) dark++;
-      if (g > red + 18 && g > blue + 12) green++;
-      if (x > 0) {
-        uint32_t left = pixels[y * stride + x - 1];
-        int left_luma = ((((left >> 16) & 0xff) * 3) +
-                         (((left >> 8) & 0xff) * 5) +
-                         ((left & 0xff) * 2)) / 10;
-        if (abs(luminance - left_luma) > 44) edges++;
-      }
-      if (y > 0) {
-        uint32_t above = pixels[(y - 1) * stride + x];
-        int above_luma = ((((above >> 16) & 0xff) * 3) +
-                          (((above >> 8) & 0xff) * 5) +
-                          ((above & 0xff) * 2)) / 10;
-        if (abs(luminance - above_luma) > 44) edges++;
-      }
-    }
-  }
-  if (dark > size * size * 3 / 4) return -3.0f;
-  if (green > size * size / 2 && edges > size) return 10.0f;
-  if (edges > size * 3) return 6.0f;
-  if (luminance_sum / (size * size) < 62) return 3.0f;
-  return 0.0f;
+static uint16_t read_rom16(uint32_t address) {
+  const uint8_t *data = RomPtr(address);
+  return (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
 }
 
-static float stable_overworld_height(const uint32_t *pixels, int stride,
-                                     int size, uint16_t world_x,
-                                     uint16_t world_y) {
-  uint16_t area = read_wram16(0x8a);
-  int index = ((world_y & 0x1f8) >> 3) * 64 +
-              ((world_x & 0x1f8) >> 3);
-  int8_t candidate =
-      (int8_t)pixel_material_height(pixels, stride, size);
+/*
+ * This is ALTTP's live Overworld_GetTileAttributeAtLocation lookup.  It
+ * resolves the current mutable Map16 tile in WRAM down to the exact 8x8
+ * collision attribute, so weather and animated palette pixels never affect
+ * geometry.
+ */
+static uint8_t overworld_tile_attribute(uint16_t world_x,
+                                        uint16_t world_y) {
+  uint16_t tile_x = world_x >> 3;
+  uint16_t offset =
+      (uint16_t)(((world_y - read_wram16(0x0708)) &
+                  read_wram16(0x070a)) * 8);
+  uint16_t map16, map8;
+  offset |= (uint16_t)((tile_x - read_wram16(0x070c)) &
+                       read_wram16(0x070e));
+  map16 = read_wram16(0x2000 + ((offset >> 1) << 1));
+  if (map16 >= 3752) return 0;
+  map8 = read_rom16(0x8f8000u +
+                    (uint32_t)(map16 * 4 +
+                               ((world_y & 8) >> 2) +
+                               (tile_x & 1)) * 2);
+  return RomPtr(0x8e9459u)[map8 & 0x1ff];
+}
 
-  if (area != s_overworld_area) {
-    memset(s_overworld_height, 0x80, sizeof(s_overworld_height));
-    memset(s_overworld_votes, 0, sizeof(s_overworld_votes));
-    s_overworld_area = area;
-  }
-  if (s_overworld_height[index] != INT8_MIN)
-    return (float)s_overworld_height[index];
+static int overworld_attribute_is_solid(uint8_t attribute) {
+  return (attribute >= 0x01 && attribute <= 0x03) ||
+         attribute == 0x26 || attribute == 0x27 ||
+         attribute == 0x42 || attribute == 0x43 ||
+         attribute == 0x46 ||
+         (attribute >= 0x50 && attribute <= 0x57);
+}
 
-  if (!s_overworld_votes[index] ||
-      s_overworld_candidate[index] != candidate) {
-    s_overworld_candidate[index] = candidate;
-    s_overworld_votes[index] = 1;
-  } else if (s_overworld_votes[index] < 3) {
-    s_overworld_votes[index]++;
-  }
-  if (s_overworld_votes[index] >= 3) {
-    s_overworld_height[index] = candidate;
-    return (float)candidate;
-  }
+static float overworld_attribute_height(uint8_t attribute) {
+  if (attribute == 0x20 ||
+      (attribute >= 0xb0 && attribute <= 0xbd))
+    return -8.0f;
+  if (attribute == 0x08 || attribute == 0x0b)
+    return -5.0f;
+  if (attribute == 0x09)
+    return -2.0f;
+
+  /* Diagonal slopes, exterior stairs, and the walkable interruption in a
+   * ledge form the intermediate tread between ground and a full plateau. */
+  if ((attribute >= 0x10 && attribute <= 0x13) ||
+      (attribute >= 0x18 && attribute <= 0x1f) ||
+      attribute == 0x22 ||
+      (attribute >= 0x30 && attribute <= 0x3f))
+    return 16.0f;
+
+  /* Ledge faces are the two-Link-tall elevation break visible in the
+   * top-down art, rather than a knee-high material bump. */
+  if (attribute >= 0x28 && attribute <= 0x2f)
+    return 32.0f;
+  if (overworld_attribute_is_solid(attribute))
+    return 36.0f;
   return 0.0f;
 }
 
@@ -200,8 +194,8 @@ static float zelda_cell_height(const uint32_t *pixels, int stride,
     return 0.0f;
   }
   if (module == 9)
-    return stable_overworld_height(
-        pixels, stride, size, world_x, world_y);
+    return overworld_attribute_height(
+        overworld_tile_attribute(world_x, world_y));
   return 0.0f;
 }
 
@@ -343,6 +337,10 @@ void ZeldaVoxelConfigurePpu(void) {
       PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj, NULL, 0);
       s_link_overlay_bound = 0;
     }
+    if (s_hud_overlay_bound) {
+      PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Bg3, NULL, 0);
+      s_hud_overlay_bound = 0;
+    }
     return;
   }
 
@@ -351,7 +349,14 @@ void ZeldaVoxelConfigurePpu(void) {
         g_ppu, kPpuOverlaySource_Obj, (uint8_t *)s_link_overlay,
         256 * sizeof(uint32_t));
   }
-  if (!s_link_overlay_bound) return;
+  if (!s_hud_overlay_bound) {
+    s_hud_overlay_bound = PpuBindOverlaySurface(
+        g_ppu, kPpuOverlaySource_Bg3, (uint8_t *)s_hud_overlay,
+        256 * sizeof(uint32_t));
+  }
+  if (s_hud_overlay_bound)
+    PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
+                         0, 0, 256, ZELDA_VOXEL_SOURCE_Y, 0);
 
   link_x = (int16_t)(uint16_t)(
       read_wram16(0x22) - read_wram16(0xe2));
@@ -362,7 +367,8 @@ void ZeldaVoxelConfigurePpu(void) {
    * animation change, so filter spatially across the complete OAM table.
    * Only pixels inside his tight live body rectangle are omitted; weapon
    * pixels extending beyond it, enemies, rain, and other effects remain. */
-  if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
+  if (s_link_overlay_bound &&
+      PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
                            link_x - 12, link_y - 20, 40, 48,
                            kPpuOverlayFlag_RemoveFromGame))
     PpuSetOverlayOamRange(g_ppu, 0, 128);
@@ -404,7 +410,7 @@ void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
   eye_z = clamp_float(eye_z, 4.0f, 188.0f);
   scene.use_camera_pose = 1;
   scene.camera_eye_x = eye_x + cosf(heading) * 2.0f;
-  scene.camera_eye_y = 8.0f;
+  scene.camera_eye_y = 12.0f;
   scene.camera_eye_z = eye_z + sinf(heading) * 2.0f;
   scene.camera_look_at_x =
       scene.camera_eye_x + cosf(heading) * cosf(look_pitch) * 128.0f;
@@ -415,8 +421,17 @@ void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
   scene.camera_focal_scale =
       clamp_float(0.78f * 285.0f / s_render_distance, 0.48f, 1.25f);
   scene.camera_center_y = 0.58f;
-  scene.preserve_top_rows = ZELDA_VOXEL_SOURCE_Y;
+  scene.preserve_top_rows = 0;
   scene.sky_top = g_ram[0x10] == 7 ? 0xff10151fu : 0xff243b5au;
   scene.sky_bottom = g_ram[0x10] == 7 ? 0xff4b5360u : 0xff8fb6c6u;
-  snes_voxel_render(&scene);
+  if (snes_voxel_render(&scene) && s_hud_overlay_bound) {
+    uint32_t *frame = (uint32_t *)pixels;
+    for (int y = 0; y < ZELDA_VOXEL_SOURCE_Y; y++) {
+      for (int x = 0; x < 256; x++) {
+        uint32_t color = s_hud_overlay[y * 256 + x];
+        if (color)
+          frame[y * scene.framebuffer_stride + source_x + x] = color;
+      }
+    }
+  }
 }
