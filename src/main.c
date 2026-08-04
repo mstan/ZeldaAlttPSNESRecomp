@@ -47,6 +47,7 @@
 #include "host_report.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, kWsExtraMax, RtlWidescreenPresent
 #include "snes/color_lut.h"  // opt-in present-time CRT color LUT (SNESRECOMP_SCREEN)
+#include "zelda_voxel.h"
 
 typedef struct GamepadInfo {
   uint32 modifiers;
@@ -352,6 +353,7 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   }
   g_rtl_game_info->draw_ppu_frame();
   RtlWidescreenPresent(pixel_buffer, pitch, g_my_pixels, g_snes_width, g_snes_height);
+  ZeldaVoxelPostRender(pixel_buffer, pitch, g_snes_width, g_snes_height);
   // Present-time color grading (opt-in, SNESRECOMP_SCREEN=crt|trinitron; default
   // raw = no-op). Applied to the present copy only, row by row so the texture
   // pitch is honored. The raw g_my_pixels (frame-hashed oracle) is never touched.
@@ -364,7 +366,7 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 }
 
 static void DrawPpuFrameWithPerf(void) {
-  int render_scale = PpuGetCurrentRenderScale(g_ppu, g_ppu_render_flags);
+  const int render_scale = 1;
   uint8 *pixel_buffer = 0;
   int pitch = 0;
 
@@ -1073,7 +1075,6 @@ int main(int argc, char** argv) {
   // could see at 256px. Keep authentic caps configurable at 4:3, but lift them
   // whenever widescreen is active so sprites do not disappear prematurely.
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
-    g_config.extend_y * kPpuRenderFlags_Height240 |
     (g_config.no_sprite_limits || g_ws_adaptive_enabled) *
       kPpuRenderFlags_NoSpriteLimits;
 
@@ -1304,6 +1305,7 @@ error_reading:;
     host_report_crash_test_tick();
 
     while (SDL_PollEvent(&event)) {
+      ZeldaVoxelHandleEvent(&event);
       switch (event.type) {
       case SDL_CONTROLLERDEVICEADDED:
         OpenOneGamepad(event.cdevice.which);
@@ -1404,6 +1406,7 @@ error_reading:;
     uint32 inputs = g_input_state | g_pad_buttons | g_gamepad[0].axis_buttons | g_gamepad[1].axis_buttons << 12;
     inputs |= TickScript();
     inputs |= debug_server_get_controller_inputs();
+    inputs = ZeldaVoxelRemapInput(inputs);
     RtlRunFrame(inputs | GetActiveControllers() | debug_server_get_controller_active_mask());
 
 #ifdef ENABLE_ORACLE_BACKEND

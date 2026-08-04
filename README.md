@@ -1,5 +1,18 @@
 # ZeldaAlttPSNESRecomp
 
+## Voxel 3D orbit experiment
+
+This branch starts gameplay in an experimental, presentation-only voxel view.
+The final SNES frame is divided into live 8x8 cells, Zelda dungeon collision
+attributes and pixel materials assign their heights, and the shared
+SNESRecomp compositor projects those cells as textured prisms. Title, file
+select, inventory, and other non-gameplay modules remain in the native view.
+
+The right stick continuously rotates yaw and pitch. Numpad 4/6 adjusts yaw,
+8/2 adjusts pitch, 7/9 adjusts roll, +/- zooms, 5 resets the camera, and
+Numpad 0 toggles the experiment. Set `SNESRECOMP_VOXEL3D=0` before launch to
+disable it completely.
+
 > _This recompilation is a **byproduct of developing
 > [snesrecomp](https://github.com/mstan/snesrecomp)** — the games are the proving ground, the framework is the goal.
 > **These are in-development previews, not finished ports — expect rough

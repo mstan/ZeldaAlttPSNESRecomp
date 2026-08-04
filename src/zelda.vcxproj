@@ -228,6 +228,7 @@
     <ClCompile Include="..\snesrecomp\runner\src\common_cpu_infra.c" />
     <ClCompile Include="..\snesrecomp\runner\src\common_rtl.c" />
     <ClCompile Include="..\snesrecomp\runner\src\widescreen.c" />
+    <ClCompile Include="..\snesrecomp\runner\src\voxel_renderer.c" />
     <ClCompile Include="..\snesrecomp\runner\src\recomp_hw.c" />
     <ClCompile Include="..\snesrecomp\runner\src\framedump.c" />
     <ClCompile Include="..\snesrecomp\runner\src\launcher.c" />
@@ -296,6 +297,7 @@
     <ClCompile Include="config.c" />
     <ClCompile Include="glsl_shader.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="zelda_voxel.c" />
     <ClCompile Include="post_mortem.c" />
 
     <ClCompile Include="opengl.c" />
@@ -358,6 +360,8 @@
     <ClInclude Include="..\snesrecomp\runner\src\common_cpu_infra.h" />
     <ClInclude Include="..\snesrecomp\runner\src\common_rtl.h" />
     <ClInclude Include="config.h" />
+    <ClInclude Include="zelda_voxel.h" />
+    <ClInclude Include="..\snesrecomp\runner\src\voxel_renderer.h" />
     <ClInclude Include="consts.h" />
     <ClInclude Include="..\recomp\funcs.h" />
     <ClInclude Include="glsl_shader.h" />
