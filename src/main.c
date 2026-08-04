@@ -351,6 +351,7 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     // the real edge is ever shown. Off-policy screens collapse to pillarbox.
     ZeldaConfigurePpuSideSpace();
   }
+  ZeldaVoxelConfigurePpu();
   g_rtl_game_info->draw_ppu_frame();
   ZeldaVoxelPostRender(g_my_pixels, (size_t)g_snes_width * 4,
                        g_snes_width, g_snes_height);

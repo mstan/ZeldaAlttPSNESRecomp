@@ -6,6 +6,7 @@
 #include "zelda_voxel.h"
 
 #include "common_rtl.h"
+#include "snes/ppu.h"
 #include "voxel_renderer.h"
 
 #include <math.h>
@@ -27,6 +28,8 @@ static float s_distance = 285.0f;
 static float s_render_pitch, s_render_yaw, s_render_roll;
 static float s_render_distance = 285.0f;
 static float s_left_x, s_left_y, s_right_x, s_right_y;
+static uint32_t s_link_overlay[256 * 240];
+static int s_link_overlay_bound;
 
 static int clamp_int(int value, int low, int high) {
   if (value < low) return low;
@@ -251,7 +254,7 @@ uint32_t ZeldaVoxelRemapInput(uint32_t input) {
     return input;
   }
   initialize_heading();
-  directions = input & 0x0f;
+  directions = input & 0xf0;
   magnitude = sqrtf(s_left_x * s_left_x + s_left_y * s_left_y);
   if (magnitude > 0.25f) {
     float strength = (magnitude - 0.25f) / 0.75f;
@@ -259,10 +262,10 @@ uint32_t ZeldaVoxelRemapInput(uint32_t input) {
     strafe = s_left_x / magnitude * strength;
     forward = -s_left_y / magnitude * strength;
   } else {
-    strafe = ((directions & 0x08) ? 1.0f : 0.0f) -
-             ((directions & 0x04) ? 1.0f : 0.0f);
-    forward = ((directions & 0x01) ? 1.0f : 0.0f) -
-              ((directions & 0x02) ? 1.0f : 0.0f);
+    strafe = ((directions & 0x80) ? 1.0f : 0.0f) -
+             ((directions & 0x40) ? 1.0f : 0.0f);
+    forward = ((directions & 0x10) ? 1.0f : 0.0f) -
+              ((directions & 0x20) ? 1.0f : 0.0f);
   }
   if (fabsf(strafe) > 0.01f || fabsf(forward) > 0.01f) {
     float abs_x, abs_z;
@@ -274,19 +277,54 @@ uint32_t ZeldaVoxelRemapInput(uint32_t input) {
     abs_z = fabsf(world_z);
     if (fabsf(abs_x - abs_z) < 0.10f &&
         s_last_mapped_direction != 0) {
-      if (s_last_mapped_direction == 4 ||
-          s_last_mapped_direction == 8)
-        mapped = world_x >= 0.0f ? 8 : 4;
+      if (s_last_mapped_direction == 0x40 ||
+          s_last_mapped_direction == 0x80)
+        mapped = world_x >= 0.0f ? 0x80 : 0x40;
       else
-        mapped = world_z >= 0.0f ? 2 : 1;
+        mapped = world_z >= 0.0f ? 0x20 : 0x10;
     } else if (abs_x >= abs_z) {
-      mapped = world_x >= 0.0f ? 8 : 4;
+      mapped = world_x >= 0.0f ? 0x80 : 0x40;
     } else {
-      mapped = world_z >= 0.0f ? 2 : 1;
+      mapped = world_z >= 0.0f ? 0x20 : 0x10;
     }
   }
   s_last_mapped_direction = mapped;
-  return (input & ~0x0fu) | (uint32_t)mapped;
+  return (input & ~0xf0u) | (uint32_t)mapped;
+}
+
+void ZeldaVoxelConfigurePpu(void) {
+  int link_x, link_y;
+  initialize_once();
+  if (!g_ppu) return;
+
+  PpuClearOverlayCaptures(g_ppu);
+  if (!s_enabled || !s_view_enabled || !gameplay_visible()) {
+    if (s_link_overlay_bound) {
+      PpuBindOverlaySurface(g_ppu, kPpuOverlaySource_Obj, NULL, 0);
+      s_link_overlay_bound = 0;
+    }
+    return;
+  }
+
+  if (!s_link_overlay_bound) {
+    s_link_overlay_bound = PpuBindOverlaySurface(
+        g_ppu, kPpuOverlaySource_Obj, (uint8_t *)s_link_overlay,
+        256 * sizeof(uint32_t));
+  }
+  if (!s_link_overlay_bound) return;
+
+  link_x = (int16_t)(uint16_t)(
+      read_wram16(0x22) - read_wram16(0xe2));
+  link_y = (int16_t)(uint16_t)(
+      read_wram16(0x20) - read_wram16(0xe8));
+
+  /* Link is assembled from the leading OAM slots. Capture only those slots
+   * inside a tight live rectangle and omit them from the game surface; other
+   * actors and effects remain visible even when their cards cross nearby. */
+  if (PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
+                           link_x - 8, link_y - 8, 32, 40,
+                           kPpuOverlayFlag_RemoveFromGame))
+    PpuSetOverlayOamRange(g_ppu, 0, 12);
 }
 
 void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,

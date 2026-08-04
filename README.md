@@ -11,10 +11,12 @@ select, inventory, and other non-gameplay modules remain in the native view.
 The camera follows Link's live screen position. The right stick looks
 horizontally and vertically. The left stick, D-pad, and arrow keys move
 relative to that view; their intent is quantized back to Zelda's native four
-directions with a small hysteresis band near diagonals. Numpad 4/6 adjusts the
-yaw offset, 8/2 adjusts pitch, 7/9 adjusts roll, +/- changes field of view,
-5 resets the camera, and Numpad 0 toggles the experiment. Set
-`SNESRECOMP_VOXEL3D=0` before launch to disable it completely.
+directions with a small hysteresis band near diagonals. Link's own OAM
+metasprite is suppressed while this camera occupies his position; other
+actors and effects remain in the scene. Numpad 4/6 adjusts the yaw offset,
+8/2 adjusts pitch, 7/9 adjusts roll, +/- changes field of view, 5 resets the
+camera, and Numpad 0 toggles the experiment. Set `SNESRECOMP_VOXEL3D=0`
+before launch to disable it completely.
 
 > _This recompilation is a **byproduct of developing
 > [snesrecomp](https://github.com/mstan/snesrecomp)** — the games are the proving ground, the framework is the goal.
