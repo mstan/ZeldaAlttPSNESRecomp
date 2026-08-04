@@ -16,6 +16,9 @@
 
 #define ZELDA_VOXEL_SOURCE_Y 32
 #define ZELDA_VOXEL_SOURCE_HEIGHT 192
+#define ZELDA_VOXEL_COLUMNS 32
+#define ZELDA_VOXEL_ROWS 24
+#define ZELDA_VOXEL_MAX_BILLBOARDS 64
 
 static int s_initialized;
 static int s_enabled = 1;
@@ -32,6 +35,10 @@ static uint32_t s_link_overlay[256 * 240];
 static uint32_t s_hud_overlay[256 * 240];
 static int s_link_overlay_bound;
 static int s_hud_overlay_bound;
+static SnesVoxelBillboard s_billboards[ZELDA_VOXEL_MAX_BILLBOARDS];
+static uint8_t s_sprite_cells[ZELDA_VOXEL_COLUMNS * ZELDA_VOXEL_ROWS];
+static uint8_t s_sprite_visited[ZELDA_VOXEL_COLUMNS * ZELDA_VOXEL_ROWS];
+static int s_billboard_count;
 
 static int clamp_int(int value, int low, int high) {
   if (value < low) return low;
@@ -199,6 +206,134 @@ static float zelda_cell_height(const uint32_t *pixels, int stride,
   return 0.0f;
 }
 
+static int cell_opaque_pixel_count(int cell_x, int cell_y) {
+  int count = 0;
+  int x0 = cell_x * 8;
+  int y0 = ZELDA_VOXEL_SOURCE_Y + cell_y * 8;
+  for (int y = y0; y < y0 + 8; y++) {
+    for (int x = x0; x < x0 + 8; x++) {
+      if (s_link_overlay[y * 256 + x] >> 24)
+        count++;
+    }
+  }
+  return count;
+}
+
+static void prepare_sprite_billboards(void) {
+  int queue[ZELDA_VOXEL_COLUMNS * ZELDA_VOXEL_ROWS];
+  int link_x = (int16_t)(uint16_t)(
+      read_wram16(0x22) - read_wram16(0xe2));
+  int link_y = (int16_t)(uint16_t)(
+      read_wram16(0x20) - read_wram16(0xe8));
+
+  /*
+   * Remove Link's body from the isolated OBJ plane.  The PPU clears and
+   * refills this surface every frame, so this does not accumulate.  Weapon
+   * pixels extending outside the body rectangle remain eligible.
+   */
+  for (int y = clamp_int(link_y - 20, ZELDA_VOXEL_SOURCE_Y, 224);
+       y < clamp_int(link_y + 28, ZELDA_VOXEL_SOURCE_Y, 224); y++) {
+    for (int x = clamp_int(link_x - 12, 0, 256);
+         x < clamp_int(link_x + 28, 0, 256); x++)
+      s_link_overlay[y * 256 + x] = 0;
+  }
+
+  memset(s_sprite_cells, 0, sizeof(s_sprite_cells));
+  memset(s_sprite_visited, 0, sizeof(s_sprite_visited));
+  s_billboard_count = 0;
+  for (int cell_y = 0; cell_y < ZELDA_VOXEL_ROWS; cell_y++) {
+    for (int cell_x = 0; cell_x < ZELDA_VOXEL_COLUMNS; cell_x++) {
+      int index = cell_y * ZELDA_VOXEL_COLUMNS + cell_x;
+      if (cell_opaque_pixel_count(cell_x, cell_y) >= 3)
+        s_sprite_cells[index] = 1;
+    }
+  }
+
+  for (int start = 0;
+       start < ZELDA_VOXEL_COLUMNS * ZELDA_VOXEL_ROWS; start++) {
+    int head = 0, tail = 0;
+    int min_x, max_x, min_y, max_y;
+    int opaque_pixels = 0;
+    if (!s_sprite_cells[start] || s_sprite_visited[start])
+      continue;
+    queue[tail++] = start;
+    s_sprite_visited[start] = 1;
+    min_x = max_x = start % ZELDA_VOXEL_COLUMNS;
+    min_y = max_y = start / ZELDA_VOXEL_COLUMNS;
+    while (head < tail) {
+      int index = queue[head++];
+      int cell_x = index % ZELDA_VOXEL_COLUMNS;
+      int cell_y = index / ZELDA_VOXEL_COLUMNS;
+      opaque_pixels += cell_opaque_pixel_count(cell_x, cell_y);
+      if (cell_x < min_x) min_x = cell_x;
+      if (cell_x > max_x) max_x = cell_x;
+      if (cell_y < min_y) min_y = cell_y;
+      if (cell_y > max_y) max_y = cell_y;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int nx = cell_x + dx, ny = cell_y + dy, next;
+          if ((!dx && !dy) || nx < 0 || nx >= ZELDA_VOXEL_COLUMNS ||
+              ny < 0 || ny >= ZELDA_VOXEL_ROWS)
+            continue;
+          next = ny * ZELDA_VOXEL_COLUMNS + nx;
+          if (s_sprite_cells[next] && !s_sprite_visited[next]) {
+            s_sprite_visited[next] = 1;
+            queue[tail++] = next;
+          }
+        }
+      }
+    }
+
+    /* Rain streaks and single sparkle fragments stay ordinary screen-space
+     * particles.  Substantial OBJ clusters become upright sprites. */
+    if (opaque_pixels >= 24 &&
+        s_billboard_count < ZELDA_VOXEL_MAX_BILLBOARDS) {
+      int x0 = min_x * 8;
+      int y0 = ZELDA_VOXEL_SOURCE_Y + min_y * 8;
+      int x1 = (max_x + 1) * 8;
+      int y1 = ZELDA_VOXEL_SOURCE_Y + (max_y + 1) * 8;
+      int anchor_cell_x = clamp_int((x0 + x1) / 16, 0,
+                                    ZELDA_VOXEL_COLUMNS - 1);
+      int anchor_cell_y = clamp_int(
+          (y1 - ZELDA_VOXEL_SOURCE_Y - 1) / 8, 0,
+          ZELDA_VOXEL_ROWS - 1);
+      SnesVoxelBillboard *billboard =
+          &s_billboards[s_billboard_count++];
+      billboard->pixels = s_link_overlay + y0 * 256 + x0;
+      billboard->pixel_stride = 256;
+      billboard->texture_width = x1 - x0;
+      billboard->texture_height = y1 - y0;
+      billboard->world_x = (x0 + x1) * 0.5f;
+      billboard->world_z =
+          (float)(y1 - ZELDA_VOXEL_SOURCE_Y - 3);
+      billboard->base_height =
+          zelda_cell_height(NULL, 0, 8, anchor_cell_x,
+                            anchor_cell_y, NULL);
+      billboard->world_height = 16.0f;
+      billboard->world_width = clamp_float(
+          16.0f * billboard->texture_width /
+              billboard->texture_height,
+          7.0f, 18.0f);
+      for (int i = 0; i < tail; i++)
+        s_sprite_cells[queue[i]] = 2;
+    }
+  }
+}
+
+static void restore_screen_space_particles(uint32_t *frame, int stride,
+                                           int source_x) {
+  for (int y = ZELDA_VOXEL_SOURCE_Y; y < 224; y++) {
+    int cell_y = (y - ZELDA_VOXEL_SOURCE_Y) / 8;
+    for (int x = 0; x < 256; x++) {
+      uint32_t color = s_link_overlay[y * 256 + x];
+      int cell_x = x / 8;
+      if (color &&
+          s_sprite_cells[cell_y * ZELDA_VOXEL_COLUMNS + cell_x] != 2)
+        frame[y * stride + source_x + x] = color;
+    }
+  }
+}
+
 static void update_camera(void) {
   if (s_enabled && s_view_enabled && gameplay_visible()) {
     initialize_heading();
@@ -327,7 +462,6 @@ uint32_t ZeldaVoxelRemapInput(uint32_t input) {
 }
 
 void ZeldaVoxelConfigurePpu(void) {
-  int link_x, link_y;
   initialize_once();
   if (!g_ppu) return;
 
@@ -358,18 +492,15 @@ void ZeldaVoxelConfigurePpu(void) {
     PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Bg3,
                          0, 0, 256, ZELDA_VOXEL_SOURCE_Y, 0);
 
-  link_x = (int16_t)(uint16_t)(
-      read_wram16(0x22) - read_wram16(0xe2));
-  link_y = (int16_t)(uint16_t)(
-      read_wram16(0x20) - read_wram16(0xe8));
-
-  /* ALTTP moves Link's component sprites between OAM regions as equipment and
-   * animation change, so filter spatially across the complete OAM table.
-   * Only pixels inside his tight live body rectangle are omitted; weapon
-   * pixels extending beyond it, enemies, rain, and other effects remain. */
+  /*
+   * Isolate the whole gameplay OBJ plane.  Post-render classification turns
+   * substantial sprite clusters into vertical billboards, suppresses Link,
+   * and restores small rain/sparkle particles in screen space.
+   */
   if (s_link_overlay_bound &&
       PpuSetOverlayCapture(g_ppu, kPpuOverlaySource_Obj,
-                           link_x - 12, link_y - 20, 40, 48,
+                           0, ZELDA_VOXEL_SOURCE_Y,
+                           256, ZELDA_VOXEL_SOURCE_HEIGHT,
                            kPpuOverlayFlag_RemoveFromGame))
     PpuSetOverlayOamRange(g_ppu, 0, 128);
 }
@@ -395,6 +526,9 @@ void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
   scene.source_height = ZELDA_VOXEL_SOURCE_HEIGHT;
   scene.cell_size = 8;
   scene.cell_height = zelda_cell_height;
+  prepare_sprite_billboards();
+  scene.billboards = s_billboards;
+  scene.billboard_count = s_billboard_count;
   scene.roll_degrees = s_render_roll;
   initialize_heading();
   heading = (s_heading + s_render_yaw) *
@@ -424,13 +558,17 @@ void ZeldaVoxelPostRender(uint8_t *pixels, size_t pitch,
   scene.preserve_top_rows = 0;
   scene.sky_top = g_ram[0x10] == 7 ? 0xff10151fu : 0xff243b5au;
   scene.sky_bottom = g_ram[0x10] == 7 ? 0xff4b5360u : 0xff8fb6c6u;
-  if (snes_voxel_render(&scene) && s_hud_overlay_bound) {
+  if (snes_voxel_render(&scene)) {
     uint32_t *frame = (uint32_t *)pixels;
-    for (int y = 0; y < ZELDA_VOXEL_SOURCE_Y; y++) {
-      for (int x = 0; x < 256; x++) {
-        uint32_t color = s_hud_overlay[y * 256 + x];
-        if (color)
-          frame[y * scene.framebuffer_stride + source_x + x] = color;
+    restore_screen_space_particles(
+        frame, scene.framebuffer_stride, source_x);
+    if (s_hud_overlay_bound) {
+      for (int y = 0; y < ZELDA_VOXEL_SOURCE_Y; y++) {
+        for (int x = 0; x < 256; x++) {
+          uint32_t color = s_hud_overlay[y * 256 + x];
+          if (color)
+            frame[y * scene.framebuffer_stride + source_x + x] = color;
+        }
       }
     }
   }
