@@ -48,6 +48,7 @@ add_executable(ZeldaALttPSNESRecomp
     src/main.c
     src/post_mortem.c
     src/opengl.c
+    src/zelda_voxel.c
     src/zelda_00.c
     src/gen_stubs.c
     src/zelda_cpu_infra.c
@@ -64,6 +65,7 @@ add_executable(ZeldaALttPSNESRecomp
 # wires sources/includes/RECOMP_LAUNCHER define/CXX/asset-staging (same Zelda
 # boxart; recomp-ui's default pad.tga is already the SNES pad).
 recomp_target_launcher_ui(ZeldaALttPSNESRecomp
+    CONSOLE snes
     BOXART ${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga)
 
 target_include_directories(ZeldaALttPSNESRecomp PRIVATE
