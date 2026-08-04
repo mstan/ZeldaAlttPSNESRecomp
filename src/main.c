@@ -352,8 +352,9 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     ZeldaConfigurePpuSideSpace();
   }
   g_rtl_game_info->draw_ppu_frame();
+  ZeldaVoxelPostRender(g_my_pixels, (size_t)g_snes_width * 4,
+                       g_snes_width, g_snes_height);
   RtlWidescreenPresent(pixel_buffer, pitch, g_my_pixels, g_snes_width, g_snes_height);
-  ZeldaVoxelPostRender(pixel_buffer, pitch, g_snes_width, g_snes_height);
   // Present-time color grading (opt-in, SNESRECOMP_SCREEN=crt|trinitron; default
   // raw = no-op). Applied to the present copy only, row by row so the texture
   // pitch is honored. The raw g_my_pixels (frame-hashed oracle) is never touched.
