@@ -10,9 +10,17 @@ project(ZeldaALttPSNESRecomp C)
 #
 # Prerequisites: a snesrecomp checkout at ./snesrecomp (symlink/clone of the
 # sibling repo), the generated C in src/gen/ (run `bash tools/regen.sh` with a
-# verified zelda.sfc at the repo root), SDL2 (e.g. `apt install libsdl2-dev`).
+# verified zelda.sfc at the repo root), and SDL3 (SDL2 still works via
+# -DSNESRECOMP_SDL_BACKEND=SDL2).
 
 set(CMAKE_C_STANDARD 11)
+
+# Reported by host_report_init() in crash breadcrumbs/minidumps. Without this the
+# CMake path ships stamped "dev" and user crash reports cannot be tied to a
+# release. NOTE: quote it when configuring - PowerShell rewrites an unquoted
+# -DSNESRECOMP_BUILD_VERSION=0.6.0 into "0".
+set(SNESRECOMP_BUILD_VERSION "dev" CACHE STRING
+    "Version reported in crash diagnostics and network metadata")
 
 # Widescreen is a mod package, not a Display setting (same migration as Mega Man
 # X / X2 / Super Mario World / Super Mario Kart). Must be set BEFORE
@@ -59,6 +67,10 @@ add_executable(ZeldaALttPSNESRecomp
     # recompiled banks (generated)
     ${ZELDA_GEN_SOURCES}
 )
+
+# Scoped to main.c, which is the only consumer (host_report_init).
+set_property(SOURCE src/main.c APPEND PROPERTY COMPILE_DEFINITIONS
+    SNESRECOMP_BUILD_VERSION="${SNESRECOMP_BUILD_VERSION}")
 
 # Dear ImGui pre-boot launcher (GUI) from the shared recomp-ui repo. One call
 # wires sources/includes/RECOMP_LAUNCHER define/CXX/asset-staging (same Zelda

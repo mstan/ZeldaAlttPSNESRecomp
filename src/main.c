@@ -112,6 +112,20 @@ enum {
 #define SNESRECOMP_BUILD_VERSION "dev"
 #endif
 
+/* Export an environment variable for this process. `_putenv` is a Windows-CRT
+ * name and does not exist in glibc, so every export goes through here rather
+ * than through an #ifdef at each call site — an unguarded `_putenv` only breaks
+ * the Linux link, which is easy to miss from a Windows-only build. */
+static void SetEnvVar(const char *name, const char *value) {
+#ifdef _WIN32
+  char buf[700];
+  snprintf(buf, sizeof(buf), "%s=%s", name, value);
+  _putenv(buf);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
 static const char kWindowTitle[] = "Legend of Zelda: A Link to the Past (Recompiled)";
 static uint32 g_win_flags = SDL_WINDOW_RESIZABLE;
 static SDL_Window *g_window;
@@ -1092,9 +1106,7 @@ int main(int argc, char** argv) {
           g_config.msu1_enabled        = ls.msu1_enabled != 0;
           snprintf(g_config.msu1_dir, sizeof(g_config.msu1_dir), "%s", ls.msu1_dir);
           if (g_config.msu1_enabled && g_config.msu1_dir[0]) {
-            static char msu_env[600];
-            snprintf(msu_env, sizeof(msu_env), "SNESRECOMP_MSU1=%s", g_config.msu1_dir);
-            _putenv(msu_env);
+            SetEnvVar("SNESRECOMP_MSU1", g_config.msu1_dir);
           }
           WriteConfigFile(config_file);
           /* The launcher's Hotkeys editor writes [KeyMap] straight into the
@@ -1132,13 +1144,7 @@ int main(int argc, char** argv) {
   /* Honor MSU-1 on every boot path (the launcher exports it too; skip-launcher /
    * positional boots need it set here). An existing env value wins. */
   if (g_config.msu1_enabled && g_config.msu1_dir[0] && !getenv("SNESRECOMP_MSU1")) {
-    static char msu_env[600];
-    snprintf(msu_env, sizeof(msu_env), "SNESRECOMP_MSU1=%s", g_config.msu1_dir);
-#ifdef _WIN32
-    _putenv(msu_env);
-#else
-    setenv("SNESRECOMP_MSU1", g_config.msu1_dir, 1);
-#endif
+    SetEnvVar("SNESRECOMP_MSU1", g_config.msu1_dir);
   }
 
   /* Issue #4: co-locate the ROM with the exe (interactive launches only). */
@@ -1179,11 +1185,15 @@ int main(int argc, char** argv) {
      * Lets all three sibling games run concurrently on the same host
      * without TCP-bind collisions. */
     if (debug_server_init(4378) == 0) {
+#if SNESRECOMP_TRACE
       fprintf(stderr, "[main] Debug server ready on port 4378\n");
+#endif
     }
     if (start_paused) {
       debug_server_start_paused();
+#if SNESRECOMP_TRACE
       fprintf(stderr, "[main] Started paused — send 'step N' or 'continue' via TCP\n");
+#endif
     }
   }
 
