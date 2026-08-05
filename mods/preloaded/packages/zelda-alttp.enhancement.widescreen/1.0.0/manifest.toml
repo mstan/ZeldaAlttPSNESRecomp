@@ -1,0 +1,32 @@
+format_version = 1
+id = "zelda-alttp.enhancement.widescreen"
+version = "1.0.0"
+name = "A Link to the Past Widescreen"
+author = "mstan"
+description = "Renders A Link to the Past with an adaptive wider field of view: the logical width follows the live window aspect at a fixed 224-line height, with the game-specific sprite-culling and Mode 7 margin work needed to fill it."
+license = "MIT"
+resolver = "declarative"
+save_compatibility = "shared"
+
+# Two accepted images: the stock US 1.0 ROM and qwertymodo's MSU-1 patched
+# build (both are recompiled by this game, see kZeldaKnownHashes in src/main.c).
+# The runtime is initialised with the digest of whichever one actually loaded,
+# so both must be listed or the Mods page would come up empty for MSU users.
+[[target]]
+game_id = "zelda-alttp-us"
+rom_sha256 = "66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb"
+
+[[target]]
+game_id = "zelda-alttp-us"
+rom_sha256 = "9fafc2a6b7bd8b03aaddc3418bde6626aebaf44d8ac5042e174f73b0002b7b55"
+
+[[feature]]
+id = "widescreen"
+name = "Widescreen (adaptive)"
+description = "Widen the view to match your window at a fixed 224-line height. ALttP has no fixed 16:9 mode: the logical width follows the live window aspect, so a 4:3 window renders authentic and wider windows reveal more of the room."
+group = "Display"
+default_enabled = false
+
+[[plugin]]
+feature = "widescreen"
+id = "zelda-alttp.widescreen"
