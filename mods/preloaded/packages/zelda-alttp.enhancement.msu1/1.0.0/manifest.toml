@@ -1,0 +1,24 @@
+format_version = 1
+id = "zelda-alttp.enhancement.msu1"
+version = "1.0.0"
+name = "A Link to the Past MSU-1"
+author = "qwertymodo, based on Conn; host-side Mods integration by mstan"
+description = "Implements qwertymodo's A Link to the Past MSU-1 music behavior from a compatible audio pack without patching the ROM."
+license = "MIT"
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "zelda-alttp-us"
+rom_sha256 = "66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb"
+
+[[feature]]
+id = "msu1"
+name = "MSU-1 Audio"
+description = "Use MSU-1 PCM music while leaving the game ROM stock."
+group = "Audio"
+default_enabled = false
+
+[[plugin]]
+feature = "msu1"
+id = "zelda-alttp.msu1"

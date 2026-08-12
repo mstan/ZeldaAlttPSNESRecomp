@@ -56,6 +56,8 @@ add_executable(ZeldaALttPSNESRecomp
     src/opengl.c
     # Trusted static plugin backing the widescreen mod package's activation.
     src/mods/zelda_widescreen_plugin.c
+    # Trusted static plugin backing the MSU-1 audio mod package's activation.
+    src/mods/zelda_msu1_plugin.c
     src/zelda_00.c
     src/gen_stubs.c
     src/zelda_cpu_infra.c

@@ -65,8 +65,8 @@ typedef struct Config {
   // --launcher argument or by setting SkipLauncher = 0 in config.ini.
   bool skip_launcher;
 
-  // MSU-1 streamed audio (opt-in, default off). Persisted to config.ini [Sound];
-  // when enabled with a pack in msu1_dir the launcher exports SNESRECOMP_MSU1.
+  // MSU-1 streamed audio. The Mods package owns the effective enable state;
+  // msu1_dir remains the persisted PCM pack path store.
   bool msu1_enabled;
   char msu1_dir[512];
 

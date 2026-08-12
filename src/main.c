@@ -892,23 +892,14 @@ int main(int argc, char** argv) {
    * closes, once the ROM path is final. */
   int mods_ready = 0;
   {
-    /* The MSU-1 patch is applied internally at regen time, so YOU provide a
-     * normal STOCK ROM — at build time and at runtime. The MSU driver is
-     * compiled into the binary, so the stock US ROM runs fine (SPC music, or
-     * MSU streaming when a pack is present). We recognize the stock US 1.0
-     * image and the MSU-patched image; any other ROM still loads, with a
-     * warning (romhacks / other regions). */
+    /* The Mods-enabled build runs against the stock US ROM. MSU-1 behavior is
+     * supplied by an optional trusted plugin instead of a patched ROM image. */
     static const uint8_t kZeldaKnownHashes[][32] = {
       { /* "Legend of Zelda, The - A Link to the Past (USA).sfc" — US 1.0 */
         0x66,0x87,0x1d,0x66,0xbe,0x19,0xad,0x2c,
         0x34,0xc9,0x27,0xd6,0xb1,0x4c,0xd8,0xeb,
         0x6f,0xc3,0x18,0x19,0x65,0xb6,0xe5,0x17,
         0xcb,0x36,0x1f,0x73,0x16,0x00,0x9c,0xfb },
-      { /* MSU-1-patched (qwertymodo alttp_msu.ips applied, 1.5 MiB) */
-        0x9f,0xaf,0xc2,0xa6,0xb7,0xbd,0x8b,0x03,
-        0xaa,0xdd,0xc3,0x41,0x8b,0xde,0x66,0x26,
-        0xae,0xba,0xf4,0x4d,0x8a,0xc5,0x04,0x2e,
-        0x17,0x4f,0x73,0xb0,0x00,0x2b,0x7b,0x55 },
     };
     int rom_resolved_by_launcher = 0;
 
@@ -916,14 +907,12 @@ int main(int argc, char** argv) {
      * game_id and the digest of the loaded ROM, and the runtime takes that digest
      * once at init - but the launcher needs the provider before it opens, i.e.
      * before the ROM is resolved. So hash the best candidate we already know
-     * (positional argv, else the rom.cfg cache) and pick the matching known
-     * hash; with no candidate at all, default to stock. ALttP accepts two images
-     * (stock and MSU-1-patched) and the manifest lists both. */
+     * (positional argv, else the rom.cfg cache); with no candidate at all,
+     * default to stock. */
 #if SNESRECOMP_ENABLE_MODS
     {
-      static const char *const kZeldaKnownHashHex[2] = {
+      static const char *const kZeldaKnownHashHex[1] = {
         "66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb",
-        "9fafc2a6b7bd8b03aaddc3418bde6626aebaf44d8ac5042e174f73b0002b7b55",
       };
       char cand[512];
       cand[0] = '\0';
@@ -941,8 +930,8 @@ int main(int argc, char** argv) {
       }
       int which = 0;
       if (cand[0]) {
-        int m = snesrecomp_rom_match_sha256(cand, kZeldaKnownHashes, 2);
-        if (m >= 0 && m < 2) which = m;
+        int m = snesrecomp_rom_match_sha256(cand, kZeldaKnownHashes, 1);
+        if (m >= 0 && m < 1) which = m;
       }
       mods_ready = snes_mod_runtime_initialize_c(
           "mods", "zelda-alttp-us", kZeldaKnownHashHex[which]);
@@ -1062,13 +1051,13 @@ int main(int argc, char** argv) {
 #else
         gi.widescreen_supported = 1;
 #endif
-        gi.known_sha256 = kZeldaKnownHashes;     /* stock + MSU-patched */
-        gi.num_known_sha256 = 2;
-        /* MSU-1: build is recompiled from qwertymodo's ALttP MSU-1 patch (driver
-         * in bank $22). Runs on the stock ROM; no pack -> native SPC. */
+        gi.known_sha256 = kZeldaKnownHashes;
+        gi.num_known_sha256 = 1;
+        /* MSU-1 is supplied by an optional Mods package. No enabled package
+         * or no matching track in the pack falls back to native SPC audio. */
         gi.msu1_supported = 1;
-        gi.msu1_note = "Uses qwertymodo's A Link to the Past MSU-1 patch \xE2\x80\x94 "
-                       "use a standard ALttP MSU-1 PCM pack.";
+        gi.msu1_note = "Enable the MSU-1 Audio mod and use a standard "
+                       "A Link to the Past MSU-1 PCM pack.";
         gi.config_path = config_file;  /* hotkey editor targets the live config */
 
 #if defined(RECOMP_LAUNCHER)
@@ -1105,9 +1094,6 @@ int main(int argc, char** argv) {
           g_config.skip_launcher       = ls.skip_launcher != 0;
           g_config.msu1_enabled        = ls.msu1_enabled != 0;
           snprintf(g_config.msu1_dir, sizeof(g_config.msu1_dir), "%s", ls.msu1_dir);
-          if (g_config.msu1_enabled && g_config.msu1_dir[0]) {
-            SetEnvVar("SNESRECOMP_MSU1", g_config.msu1_dir);
-          }
           WriteConfigFile(config_file);
           /* The launcher's Hotkeys editor writes [KeyMap] straight into the
            * config file, which was parsed before the launcher ran — re-apply
@@ -1135,18 +1121,12 @@ int main(int argc, char** argv) {
         int, char **, char *, size_t, const uint8_t (*)[32], size_t);
     if (!snesrecomp_launcher_resolve_rom_sha256_multi(
             la_argc, la_argv, rom_path_buf, sizeof(rom_path_buf),
-            kZeldaKnownHashes, 2)) {
+            kZeldaKnownHashes, 1)) {
       /* User cancelled the picker. */
       return 1;
     }
     }
   }
-  /* Honor MSU-1 on every boot path (the launcher exports it too; skip-launcher /
-   * positional boots need it set here). An existing env value wins. */
-  if (g_config.msu1_enabled && g_config.msu1_dir[0] && !getenv("SNESRECOMP_MSU1")) {
-    SetEnvVar("SNESRECOMP_MSU1", g_config.msu1_dir);
-  }
-
   /* Issue #4: co-locate the ROM with the exe (interactive launches only). */
   if (!start_paused && script_file == NULL && framedump_dir == NULL) {
     if (RelocateRomToExeDir(rom_path_buf, sizeof(rom_path_buf))) {
@@ -1175,7 +1155,16 @@ int main(int argc, char** argv) {
     }
     snes_mod_runtime_activate_plugins_c();
   }
+  if (!mods_ready)
+    g_config.msu1_enabled = false;
 #endif
+
+  /* MSU-1 is selected by the Mods package. The legacy config field is retained
+   * as the existing PCM pack path store until Mods has a native directory
+   * option; plugin reset/activation above owns effective enable. */
+  if (g_config.msu1_enabled && g_config.msu1_dir[0] && !getenv("SNESRECOMP_MSU1")) {
+    SetEnvVar("SNESRECOMP_MSU1", g_config.msu1_dir);
+  }
 
   // Initialize debug server
   {
@@ -1280,6 +1269,9 @@ int main(int argc, char** argv) {
 
   extern const RtlGameInfo kSmwGameInfo;
   RtlRegisterGame(&kSmwGameInfo);
+  /* RtlRegisterGame arms MSU-1 from the environment; now it can derive a pack
+   * base from the ROM path when SNESRECOMP_MSU1=auto. */
+  { extern void msu1_set_rom_path(const char *); msu1_set_rom_path(rom_path_buf); }
   Snes *snes = SnesInit(kRom, kRom_SIZE);
   host_report_breadcrumb("SnesInit: %s", snes ? "ok" : "FAILED");
   if (snes == NULL) {
