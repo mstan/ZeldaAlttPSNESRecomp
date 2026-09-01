@@ -49,7 +49,7 @@
 #include "launcher.h"
 #include "keybinds.h"
 #include "host_report.h"
-#include "widescreen.h"  // g_ws_active, g_ws_extra, kWsExtraMax, RtlWidescreenPresent
+#include "widescreen.h"  // g_ws_active, g_ws_extra, RtlWidescreenPresent
 #include "snes/color_lut.h"  // opt-in present-time CRT color LUT (SNESRECOMP_SCREEN)
 
 typedef struct GamepadInfo {
@@ -592,7 +592,9 @@ static const struct RendererFuncs kSdlRendererFuncs = {
 // Match Minish Cap's resize-driven policy: preserve the authentic logical
 // height and derive horizontal world coverage from the live drawable aspect.
 // The PPU has a symmetric border, so round directly to the nearest per-side
-// pixel. kWsExtraMax is the sprite-safe 9-bit OAM ceiling.
+// pixel. Zelda's room and overworld policies are validated through the
+// snesrev/zelda3 446px logical limit; wider shared-engine caps can reveal
+// wrapped tilemap data at the far margins.
 static int AdaptiveWidescreenExtraForSize(int drawable_width,
                                           int drawable_height) {
   if (drawable_width <= 0 || drawable_height <= 0)
@@ -605,7 +607,7 @@ static int AdaptiveWidescreenExtraForSize(int drawable_width,
 
   int64_t divisor = (int64_t)drawable_height * 2;
   int64_t extra = (numerator + divisor / 2) / divisor;
-  return extra > kWsExtraMax ? kWsExtraMax : (int)extra;
+  return extra > kZeldaWsExtraMax ? kZeldaWsExtraMax : (int)extra;
 }
 
 static void UpdateAdaptiveWidescreen(void) {
@@ -1188,7 +1190,7 @@ int main(int argc, char** argv) {
 
   g_gamepad[0].joystick_id = g_gamepad[1].joystick_id = -1;
   // Widescreen is resize-driven. Start at the authentic width; once the host
-  // window exists its live drawable aspect selects 0..kWsExtraMax columns per
+  // window exists its live drawable aspect selects 0..kZeldaWsExtraMax columns per
   // side. Default off remains the byte-identical 256-wide faithful build.
   g_ws_adaptive_enabled = g_config.widescreen != 0;
   g_ws_extra = 0;
