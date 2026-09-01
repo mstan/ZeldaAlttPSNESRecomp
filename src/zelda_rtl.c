@@ -106,7 +106,7 @@ void ZeldaAdjustSpritePrepHorizontalCull(CpuState *cpu) {
   // authentic 256-pixel view. Preserve that band while moving both horizontal
   // limits outward by the adaptive framebuffer margin. This hook runs after
   // the generated routine's stock CMP, so it only needs to replace Carry.
-  int extra = g_ws_extra > kWsExtraMax ? kWsExtraMax : g_ws_extra;
+  int extra = g_ws_extra > kZeldaWsExtraMax ? kZeldaWsExtraMax : g_ws_extra;
   uint16 x = (uint16)ZW16(cpu->D);
   bool outside = (uint16)(x + 0x40 + extra) >=
                  (uint16)(0x170 + extra * 2);

@@ -4,6 +4,11 @@
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
 
+// ALttP's widescreen policy is authored for the snesrev/zelda3 446px logical
+// limit: 256 native columns plus 95 columns per side. Wider shared-engine caps
+// can expose wrapped tilemap content beyond this game's validated room data.
+enum { kZeldaWsExtraMax = 95 };
+
 void ZeldaDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
 
