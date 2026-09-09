@@ -210,8 +210,9 @@ bundle it with gratitude; see [`recomp/msu1/ATTRIBUTION.md`](recomp/msu1/ATTRIBU
 
 ## License
 
-PolyForm Noncommercial 1.0.0. See `LICENSE`. Code in this repo is original; vendored dependencies
-under `third_party/` retain their own licenses.
+PolyForm Noncommercial 1.0.0. See `LICENSE`. Code in this repo is
+original; vendored dependencies under `third_party/` retain their own
+licenses.
 
 The *Legend of Zelda: A Link to the Past* ROM and any data extracted
 from it are **not** in this repo and are not licensed for
