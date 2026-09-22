@@ -30,13 +30,27 @@ set(SNESRECOMP_BUILD_VERSION "dev" CACHE STRING
 set(SNESRECOMP_ENABLE_MODS ON CACHE BOOL
     "Enable A Link to the Past's built-in mod catalog and SNES mod packages" FORCE)
 
-set(SNESRECOMP_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp)
+# CACHE PATH, so -DSNESRECOMP_ROOT=<engine checkout> works -- the framework
+# README documents that flag as the way to build a game against an engine
+# worktree. A plain set() here created a normal variable that SHADOWED the
+# cache entry, so the override was accepted and then silently ignored: the
+# build linked this repo's pinned snesrecomp while appearing to honour the
+# flag. SMW and MMX already use this form.
+set(SNESRECOMP_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp" CACHE PATH
+    "Path to the snesrecomp checkout used by this game")
 include(${SNESRECOMP_ROOT}/runner/runner.cmake)
 
 # Launcher UI backend: the SHARED recomp-ui launcher (F:\Projects\recomp-ui,
 # consumed as the ./recomp-ui submodule/junction) so every recomp game drives
 # ONE launcher repo. Mirrors MegamanXRecomp/StarFoxSNESRecomp.
-include(${CMAKE_SOURCE_DIR}/recomp-ui/recomp_ui.cmake)
+# CACHE PATH for the same reason as SNESRECOMP_ROOT above: engine development
+# needs to point a game at a specific recomp-ui checkout, and the engine's
+# runner/src/mod_runtime.cpp is compiled against these headers, so an engine
+# newer than this repo's pin fails to compile with confusing errors inside the
+# ENGINE's own sources rather than a version-skew message.
+set(RECOMP_UI_ROOT "${CMAKE_SOURCE_DIR}/recomp-ui" CACHE PATH
+    "Path to the shared recomp-ui checkout used by this game")
+include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
 
 find_package(OpenGL REQUIRED)
 
@@ -44,7 +58,7 @@ find_package(OpenGL REQUIRED)
 file(GLOB ZELDA_GEN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gen/*.c)
 if(NOT ZELDA_GEN_SOURCES)
     message(FATAL_ERROR
-        "src/gen/ is empty â€” run `bash tools/regen.sh` with a verified zelda.sfc "
+        "src/gen/ is empty — run `bash tools/regen.sh` with a verified zelda.sfc "
         "at the repo root before building.")
 endif()
 
