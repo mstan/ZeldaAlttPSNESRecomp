@@ -926,7 +926,7 @@ int main(int argc, char** argv) {
         if (m >= 0 && m < 1) which = m;
       }
       mods_ready = snes_mod_runtime_initialize_c(
-          "mods", "zelda-alttp-us", kZeldaKnownHashHex[which]);
+          SNES_MOD_CATALOG_ROOT, "zelda-alttp-us", kZeldaKnownHashHex[which]);
       if (!mods_ready) {
         fprintf(stderr, "SNES mods unavailable: %s\n",
                 snes_mod_runtime_last_error_c());
