@@ -44,7 +44,7 @@ find_package(OpenGL REQUIRED)
 file(GLOB ZELDA_GEN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gen/*.c)
 if(NOT ZELDA_GEN_SOURCES)
     message(FATAL_ERROR
-        "src/gen/ is empty — run `bash tools/regen.sh` with a verified zelda.sfc "
+        "src/gen/ is empty â€” run `bash tools/regen.sh` with a verified zelda.sfc "
         "at the repo root before building.")
 endif()
 
@@ -134,11 +134,10 @@ endif()
 # against the anchored cwd (the exe dir on Windows, the .AppImage's folder on
 # Linux), so the catalog has to sit beside the binary rather than in the source
 # tree. Every feature stays disabled until the player enables it in Mods.
-set(ZELDA_PRELOADED_MODS "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
-if(EXISTS "${ZELDA_PRELOADED_MODS}/packages")
-    add_custom_command(TARGET ZeldaALttPSNESRecomp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${ZELDA_PRELOADED_MODS}"
-            "$<TARGET_FILE_DIR:ZeldaALttPSNESRecomp>/mods"
-        COMMENT "Preloading the A Link to the Past mod catalog")
-endif()
+#
+# This used to be a hand-rolled copy_directory POST_BUILD command. The framework
+# now owns catalog staging and refuses to configure a project that has a catalog
+# no target declared -- exactly the state this repo was in, which is why the
+# Mods page would have been empty in every build and release zip.
+snesrecomp_target_mod_catalog(ZeldaALttPSNESRecomp
+    "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
