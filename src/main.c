@@ -47,6 +47,7 @@
 #endif
 
 #include "launcher.h"
+#include "host_args.h"
 #include "keybinds.h"
 #include "host_report.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, RtlWidescreenPresent
@@ -797,44 +798,33 @@ int main(int argc, char** argv) {
 #ifdef __SWITCH__
   SwitchImpl_Init();
 #endif
-  argc--, argv++;
-  /* Path-carrying args are resolved against the LAUNCH cwd; the anchor
-   * below changes what relative paths mean, so absolutize them first. */
-  const char *config_file = NULL;
-  if (argc >= 2 && strcmp(argv[0], "--config") == 0) {
-    static char config_abs[1024];
-    config_file = AbsolutizePathArg(argv[1], config_abs, sizeof(config_abs));
-    argc -= 2, argv += 2;
-  }
-  int start_paused = 0;
-  if (argc >= 1 && strcmp(argv[0], "--paused") == 0) {
-    start_paused = 1;
-    argc -= 1, argv += 1;
-  }
-  const char *script_file = NULL;
-  if (argc >= 2 && strcmp(argv[0], "--script") == 0) {
-    static char script_abs[1024];
-    script_file = AbsolutizePathArg(argv[1], script_abs, sizeof(script_abs));
-    argc -= 2, argv += 2;
-  }
-  const char *framedump_dir = NULL;
-  if (argc >= 2 && strcmp(argv[0], "--framedump") == 0) {
-    static char framedump_abs[1024];
-    framedump_dir = AbsolutizePathArg(argv[1], framedump_abs, sizeof(framedump_abs));
-    argc -= 2, argv += 2;
-  }
+  /* The command line is engine-owned; see snesrecomp/runner/src/host_args.h.
+   * This port used to re-implement a subset of the flags by hand, which is why
+   * --no-launcher and --rom did nothing here while working on the ports that
+   * share host_main.c. Parsing is now order-independent and path arguments are
+   * absolutized there, before the cwd anchor below changes what a relative
+   * path means. */
+  const char *program_path = (argc >= 1) ? argv[0] : NULL;
+  SnesrecompHostArgs args;
+  if (!snesrecomp_host_args_parse(&argc, &argv, &args)) return 2;
+  if (args.help) { snesrecomp_host_args_usage(program_path, NULL); return 0; }
+  if (!snesrecomp_host_args_reject_unknown(argc, argv, program_path, NULL))
+    return 2;
+  const char *config_file = args.config_file;
+  const int start_paused = args.start_paused;
+  const char *script_file = args.script_file;
+  const char *framedump_dir = args.framedump_dir;
   /* Force the GUI launcher even when SkipLauncher = 1 (the other way back is to
    * set SkipLauncher = 0 in config.ini). */
-  int force_launcher = 0;
-  if (argc >= 1 && strcmp(argv[0], "--launcher") == 0) {
-    force_launcher = 1;
-    argc -= 1, argv += 1;
-  }
-  if (argc >= 1 && argv[0] && argv[0][0] != '-' && argv[0][0] != '\0') {
-    /* Positional ROM path. */
-    static char rom_abs[1024];
-    argv[0] = (char *)AbsolutizePathArg(argv[0], rom_abs, sizeof(rom_abs));
-  }
+  const int force_launcher = args.force_launcher;
+  const int arg_no_launcher = args.no_launcher;
+  /* Downstream still reads the positional ROM from argv[0], as it always has;
+   * only the parsing moved. */
+  static char *rom_argv[2];
+  rom_argv[0] = (char *)(args.rom ? args.rom : "");
+  rom_argv[1] = NULL;
+  argv = rom_argv;
+  argc = args.rom ? 1 : 0;
 
   /* The config is config.ini next to the executable — nothing else,
    * no directory walking. Anchoring cwd to the exe dir also pins
@@ -953,7 +943,8 @@ int main(int argc, char** argv) {
       int headless = start_paused || (script_file != NULL) || (framedump_dir != NULL);
       int have_positional = (argc >= 1 && argv[0] && argv[0][0] != '-' && argv[0][0] != '\0');
       const char *no_launcher = getenv("SNESRECOMP_NO_LAUNCHER");
-      int want_launcher = !headless && !have_positional && !(no_launcher && *no_launcher);
+      int want_launcher = !headless && !arg_no_launcher && !have_positional &&
+                         !(no_launcher && *no_launcher);
 
       /* SkipLauncher (#5): boot straight from the cached ROM unless --launcher
        * forces the GUI. A missing/unreadable cache falls through to the launcher. */
