@@ -414,6 +414,10 @@ static void DrawPpuFrameWithPerf(void) {
   if (g_display_perf)
     RenderNumber(pixel_buffer + pitch * render_scale, pitch, g_curr_fps, render_scale == 4);
 
+  /* Match the WRAM dump's completed simulation frame, without pausing. */
+  const uint32 dump_frame = snes_frame_counter ? snes_frame_counter - 1 : 0;
+  FrameDump_Present(dump_frame, pixel_buffer, pitch, g_snes_width, g_snes_height);
+  FrameDump_Ppu(dump_frame, g_ppu);
   g_renderer_funcs.EndDraw();
 }
 
@@ -1462,6 +1466,11 @@ error_reading:;
   uint32 lastTick = SDL_GetTicks();
   uint32 curTick = 0;
   uint32 frameCtr = 0;
+  /* Match the shared host's optional finite replay contract. The game runs
+   * continuously and exits through normal save/audio/capture cleanup. */
+  const char *run_frames_env = getenv("SNESRECOMP_RUN_FRAMES");
+  uint32 run_frames = run_frames_env
+      ? (uint32)strtoul(run_frames_env, NULL, 10) : 0;
   uint8 audiopaused = true;
   GamepadInfo *gi;
 
@@ -1642,6 +1651,9 @@ error_reading:;
        * frame; skip only the host present. Harmless to HLE. */
       g_rtl_game_info->draw_ppu_frame();
     }
+
+    if (run_frames && frameCtr >= run_frames)
+      break;
 
     // if vsync isn't working, delay manually
     curTick = SDL_GetTicks();

@@ -55,7 +55,9 @@ include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
 find_package(OpenGL REQUIRED)
 
 # Generated recompiler output (produced by tools/regen.sh; not committed).
-file(GLOB ZELDA_GEN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gen/*.c)
+set(ZELDA_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
+    "Generated program directory (allows isolated coverage comparisons)")
+file(GLOB ZELDA_GEN_SOURCES CONFIGURE_DEPENDS ${ZELDA_GEN_DIR}/*.c)
 if(NOT ZELDA_GEN_SOURCES)
     message(FATAL_ERROR
         "src/gen/ is empty — run `bash tools/regen.sh` with a verified zelda.sfc "
