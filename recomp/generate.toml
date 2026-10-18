@@ -1,0 +1,7 @@
+schema = 1
+identity_file = "rom_identity.txt"
+cfg_roots = true
+
+[[postprocess]]
+script = "tools/apply_widescreen_overrides.py"
+args = ["--gen-dir", "{out_dir}"]
