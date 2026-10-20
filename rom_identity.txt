@@ -1,0 +1,8 @@
+display_name = The Legend of Zelda: A Link to the Past
+rom_file = zelda.sfc
+expected_crc32 = 777AAC2F
+expected_sha256 = 66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb
+rom_size = 1048576
+mapping = LoROM
+region = USA
+game_id = zelda-alttp-us
