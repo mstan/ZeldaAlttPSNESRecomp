@@ -15,7 +15,9 @@ SIGNATURE_RE = re.compile(
 )
 BRANCH_RE = re.compile(
     r"(?P<indent>\s*)if \(cpu->_flag_C == 1\) \{ cpu->cycles \+= 1; "
-    r"cpu->master_cycles \+= 8; goto L_E476_(?P<mode>M[01]X[01]); \}"
+    r"cpu->master_cycles \+= "
+    r"(?:8|\(\(g_memsel && \(cpu->PB & 0x80\)\) \? 6 : 8\)); "
+    r"goto L_E476_(?P<mode>M[01]X[01]); \}"
 )
 
 
