@@ -56,7 +56,7 @@ Active development; expect:
 
 1. Download the latest release zip from [Releases](../../releases) and
    extract it.
-2. Run `zelda.exe`. On first launch a file picker asks for your
+2. Run `ZeldaALttPSNESRecomp.exe`. On first launch a file picker asks for your
    **legally-obtained** *Legend of Zelda: A Link to the Past (USA)* ROM
    (`.sfc` / `.smc`). The expected CRC32 is `0x777AAC2F` (no-intro
    canonical USA dump, 1 MiB, LoROM). 512-byte SMC copier headers are
