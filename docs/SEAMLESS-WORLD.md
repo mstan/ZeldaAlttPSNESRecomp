@@ -42,7 +42,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
 | 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
 | 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18Ã¢â€ â€™19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
+| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
@@ -62,7 +62,7 @@ graphics/maps are checked in or distributed.
 
 Raw command journals, screenshots and source/binary receipts are in the task
 root above. `profiles/seams/*-frames.json` records four directed crossings:
-18Ã¢â€ â€™19 east, 18Ã¢â€ â€™17 west, 21Ã¢â€ â€™29 south, 29Ã¢â€ â€™21 north. The setup places Link on a
+18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢19 east, 18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢17 west, 21ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢29 south, 29ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢21 north. The setup places Link on a
 native walkable corridor and explicitly leaves the seed's AsleepInBed handler;
 only controller movement performs the crossing. It is an assisted setup, not
 evidence of completing the prologue or walking through a dungeon exit.
@@ -219,6 +219,45 @@ owner profile, SRAM, settings and observations remain preserved. Full-map
 60 FPS remains optional, and connected dungeon floors and the remaining
 interaction/progression gates remain unfinished.
 
+## Native map, entrances and foreground follow-up
+
+The owner clarified that the map flash was the game's own X-button Mode 7
+map, not F4. `profiles/native-x-map-before/open-0.bmp` reproduces a stale,
+garbled native background during its opening fade. The expanded world now
+remains visible during that native fade and the restoring submodules 32-34;
+the original Mode 7 map, zoom and input still run normally. World terrain
+and projected pieces are retained while Mode 7 temporarily replaces native
+graphics. Native brightness fades the expanded scene and resolves BG3 once.
+`profiles/native-x-map-fixed` retains the corrected opening/closing captures.
+
+Cave and door tables use positions relative to the canonical native area.
+The moving Link collision window had changed their origin. The original
+`$1B:BBF4` entrance routine now receives the canonical buffer and offsets,
+after Link's movement and before lookup/persistent writes. Both interpreted
+entry and every generated AOT width variant are covered; regeneration tests
+also scan bank 1B. `profiles/native-entrances-baseline-aligned` versus
+`profiles/native-entrances-fixed-aot-aligned` show native entries 95 and 53
+changing from blocked movement to actual module-7 interiors (rooms 271 and
+16), with entry 116 still reaching room 272. Entry 103's +8px alignment was
+invalid in both builds; the earlier x=3472 control reached room 282. These
+are assisted doorway setups followed by real controller movement, not
+quest-completion claims.
+
+The terrain compositor now retains each BG2 pixel's native high/low priority
+and transparency. OBJ priority tests that surface before drawing, so an arch
+covers Link at its actual world coordinates. Native off-screen 9-bit X
+markers used to hide blinking Link pieces are culled rather than projected
+256 pixels left. Damage blinking itself remains native. The protected
+`profiles/arch-exact-protected-v6` and `profiles/arch-priority-fixed-v6`
+captures at x=792, y=1456 show the arch occlusion change; y=1504 remains
+visible below it with visibility, lower-level and blink fields zero. The
+owner's disappearing-body screenshot also needs the corrected-build human
+check; a still image alone does not distinguish damage blinking. BG1,
+color-math and broader layering remain open.
+
+The combined candidate uses state identity `alttp-world-v7`. No old-state
+migration is provided. Native SRAM and previous owner notes remain preserved.
+
 ## Developer probes
 
 The normal TCP server handles game commands on its network thread. World
@@ -248,3 +287,18 @@ completion claims.
 `--animation-reference PATH` extends `tools/probe_world.py` with native
 feature-off `regular`/`mountain` frame-hash arrays; it checks every canonical
 area and observes changing neighbor animation before the replay gate.
+
+Combined v7 validation: `profiles/world-qualification-{light,dark}-v7`
+passes all 80 native animation families, changing neighbor animation, full
+authored populations and 70-frame byte-exact replay in both worlds (including
+a native seam crossing). `hud-layer-v7-final`, `inventory-layer-v7-final`
+and `native-x-map-v7` pass current-build save/replay and their respective
+paused/portrait/native-map checks. The native map opens and closes with the
+same player position, native Mode 7 controls, no scope failures and a
+20-frame byte-exact map replay. CTest coordinates/generation hooks pass 2/2.
+
+The next owner handoff uses `owner-demo-followup` with three independent
+checkpoints: Arch plus native map, Pyramid-side Cave, and Seam. Only the Arch
+setup has assisted damage protection to separate occlusion from hit blinking.
+The first test is paused in a normal window with normal audio. Earlier owner
+SRAM/settings/states/failed notes remain in their original profiles.

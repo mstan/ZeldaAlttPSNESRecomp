@@ -6,9 +6,10 @@ instructions or return-frame contracts are replaced by this instrumentation.
 """
 import argparse,re
 from pathlib import Path
-PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main|Ancilla_CheckSpriteCollision)_M[01]X[01]\(CpuState \*cpu\) \{')
+PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main|Ancilla_CheckSpriteCollision|Overworld_UseEntrance)_M[01]X[01]\(CpuState \*cpu\) \{')
 MARK='/* ZELDA-WORLD-ACTOR-PROJECTION */'
 CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin','Bomb_CheckSpriteDamage':'ZeldaWorldBombDamageBegin','Ancilla_ExecuteOne':'ZeldaWorldAncillaBegin','Ancilla_CheckSpriteCollision':'ZeldaWorldProjectileCollisionBegin'}
+CALLS['Overworld_UseEntrance']='ZeldaWorldEntranceBegin'
 ENDS={'Sprite_Main':'ZeldaWorldSpritesEnd','Ancilla_Main':'ZeldaWorldAncillasEnd'}
 END_MARK='/* ZELDA-WORLD-SPRITES-END */'
 POP=re.compile(r'\bRecompStackPop(?:Yield)?\(\);')
@@ -25,7 +26,8 @@ def body_end(text,start):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--gen-dir',type=Path,default=Path('src/gen'));p.add_argument('--check',action='store_true');a=p.parse_args()
  count=changed=0
- for path in sorted(a.gen_dir.glob('bank0[268]*_v2.c')):
+ paths=set(a.gen_dir.glob('bank0[268]*_v2.c'))|set(a.gen_dir.glob('bank1b*_v2.c'))
+ for path in sorted(paths):
   text=path.read_text(encoding='utf-8');matches=list(PATTERN.finditer(text));count+=len(matches)
   for match in reversed(matches):
    end=body_end(text,match.end());body=text[match.end():end]
