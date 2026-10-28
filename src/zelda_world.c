@@ -12,6 +12,8 @@
 #include "snes/ppu.h"
 #include "snes/saveload.h"
 #include "debug_server.h"
+#include "config.h"
+#include "desktop/opengl.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,6 +74,14 @@ static unsigned live_area,live_piece_count;
 static WorldPiece live_pieces[1024];
 static uint16_t live_scroll[4];
 static uint8_t live_native_oam[0x2a0];
+static WorldPiece weapon_pieces[1024];
+static unsigned weapon_piece_count;
+static bool weapon_projection;
+static int weapon_scroll_x,weapon_scroll_y;
+static uint16_t weapon_adjusted_scroll[4];
+static uint8_t weapon_oam_allocator[12],weapon_oam_pointer[4];
+static uint16_t bomb_damage_mask;
+static uint8_t bomb_damage_image[10][0x1000];
 static int sim_scroll_x,sim_scroll_y;
 static uint64_t actor_hooks;
 static bool held_transition_velocity;
@@ -148,12 +158,34 @@ static void rasterize(unsigned id) {
  }
  r->dirty=false;
 }
+/* Outdoor native actor fields, including the word-sized authored spawn ID.
+ * Keep the unique Mirror portal in the live CPU context. Area caches must
+ * never acquire a second owner for it when Link crosses an ordinary seam. */
+typedef struct NativeActor {uint8_t fields[60];} NativeActor;
+static const uint32_t actor_fields[]={0xb58,0xb6b,0xb89,0xba0,0xbb0,0xbe0,
+ 0xc9a,0xcaa,0xcba,0xcd2,0xce2,0x1f9c2,0x1fa1c,0x1fa2c,0x1fa3c,0x1fa4c};
+static void read_actor(NativeActor*out,const uint8_t*ram,unsigned k) {
+ unsigned n=0;
+ for(unsigned i=0;i<sizeof actor_fields/sizeof *actor_fields;i++)out->fields[n++]=ram[actor_fields[i]+k];
+ for(unsigned a=0xd00;a<=0xf90;a+=16)out->fields[n++]=ram[a+k];
+ out->fields[n++]=ram[0xbc0+k*2];out->fields[n]=ram[0xbc1+k*2];
+}
+static void write_actor(uint8_t*ram,unsigned k,const NativeActor*in) {
+ unsigned n=0;
+ for(unsigned i=0;i<sizeof actor_fields/sizeof *actor_fields;i++)ram[actor_fields[i]+k]=in->fields[n++];
+ for(unsigned a=0xd00;a<=0xf90;a+=16)ram[a+k]=in->fields[n++];
+ ram[0xbc0+k*2]=in->fields[n++];ram[0xbc1+k*2]=in->fields[n];
+}
+static void remove_cached_portals(uint8_t*ram) {
+ for(unsigned k=0;k<16;k++)if(ram[0xe20+k]==0x6c)ram[0xdd0+k]=0;
+}
 static void capture(unsigned id) {
  WorldArea *r=areas[id];
  if((!collision_window&&memcmp(r->tiles,g_ram+0x2000,8192))||
     memcmp(r->vram,g_ppu->vram,sizeof r->vram)||
     memcmp(r->palette,g_ppu->cgram,sizeof r->palette))r->dirty=true;
  memcpy(r->ram,g_ram,sizeof r->ram);
+ if(r->populated)remove_cached_portals(r->ram);
  if(!collision_window)memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);
  memcpy(r->ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(r->vram,g_ppu->vram,sizeof r->vram);
@@ -285,7 +317,40 @@ static void collect_pieces(WorldArea *r,int scroll_x,int scroll_y) {
  collect_oam(r,sim_pool?sim_pool->pieces:r->pieces,
    sim_pool?&sim_pool->piece_count:&r->piece_count,scroll_x,scroll_y);
 }
+static void clear_projected_oam(void) {
+ for(unsigned i=0;i<128;i++)g_ram[0x801+i*4]=0xf0;
+ memset(g_ram+0xa20,0,128);memcpy(g_ram+0xfe0,RomPtr(0x0683c7),12);
+}
+void ZeldaWorldAncillaBegin(void) {
+ if(!live_projection||RtlGuestScopeActive())return;
+ WorldArea*r=areas[live_area];if(!r)return;
+ if(weapon_projection)collect_oam(r,weapon_pieces,&weapon_piece_count,weapon_scroll_x,weapon_scroll_y);
+ else {
+  memcpy(live_native_oam,g_ram+0x800,sizeof live_native_oam);
+  memcpy(weapon_oam_allocator,g_ram+0xfe0,sizeof weapon_oam_allocator);
+  memcpy(weapon_oam_pointer,g_ram+0x90,sizeof weapon_oam_pointer);
+  for(unsigned i=0;i<4;i++)weapon_adjusted_scroll[i]=rd16(0x11e + i*2);
+  weapon_projection=true;
+ }
+ unsigned k=g_ram[0xfa0];if(k>=10)return;
+ int x=g_ram[0xc04+k]|g_ram[0xc18+k]<<8,y=g_ram[0xbfa+k]|g_ram[0xc0e + k]<<8;
+ weapon_scroll_x=x-128;weapon_scroll_y=y-112;
+ wr16(0xe0,weapon_scroll_x);wr16(0xe2,weapon_scroll_x);wr16(0xe6,weapon_scroll_y);wr16(0xe8,weapon_scroll_y);
+ wr16(0x11e,weapon_scroll_x);wr16(0x120,weapon_scroll_x);wr16(0x122,weapon_scroll_y);wr16(0x124,weapon_scroll_y);
+ clear_projected_oam();
+}
+void ZeldaWorldAncillasEnd(void) {
+ if(!weapon_projection||RtlGuestScopeActive())return;
+ collect_oam(areas[live_area],weapon_pieces,&weapon_piece_count,weapon_scroll_x,weapon_scroll_y);
+ wr16(0xe0,live_scroll[0]);wr16(0xe2,live_scroll[1]);wr16(0xe6,live_scroll[2]);wr16(0xe8,live_scroll[3]);
+ memcpy(g_ram+0x800,live_native_oam,sizeof live_native_oam);
+ memcpy(g_ram+0xfe0,weapon_oam_allocator,sizeof weapon_oam_allocator);
+ memcpy(g_ram+0x90,weapon_oam_pointer,sizeof weapon_oam_pointer);
+ for(unsigned i=0;i<4;i++)wr16(0x11e + i*2,weapon_adjusted_scroll[i]);
+ sim_scroll_x=live_scroll[1];sim_scroll_y=live_scroll[3];weapon_projection=false;
+}
 void ZeldaWorldActorBegin(void) {
+ if(!RtlGuestScopeActive())ZeldaWorldAncillasEnd();
  WorldArea*r=RtlGuestScopeActive()?sim_area:live_projection?areas[live_area]:NULL;
  if(!r)return;
  if(live_projection&&!RtlGuestScopeActive()&&live_first_actor) {
@@ -299,13 +364,12 @@ void ZeldaWorldActorBegin(void) {
  /* The original outer Sprite_Main owns native return/skip contracts. Only
   * the projection changes for each actor, so native off-screen culling does
   * not kill or pause a distant actor merely because Link is elsewhere. */
- for(unsigned i=0;i<128;i++)g_ram[0x801+i*4]=0xf0;
- memset(g_ram+0xa20,0,128);
- memcpy(g_ram+0xfe0,RomPtr(0x0683c7),12);
+ clear_projected_oam();
  actor_hooks++;
 }
 void ZeldaWorldSpritesEnd(void) {
  if(!live_projection||RtlGuestScopeActive())return;
+ ZeldaWorldAncillasEnd();
  collect_pieces(areas[live_area],sim_scroll_x,sim_scroll_y);
  wr16(0xe0,live_scroll[0]);wr16(0xe2,live_scroll[1]);wr16(0xe6,live_scroll[2]);wr16(0xe8,live_scroll[3]);
  memcpy(g_ram+0x800,live_native_oam,sizeof live_native_oam);
@@ -320,6 +384,17 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x068328)ZeldaWorldTransitionEnd();
  if(pc==0x06d13c)ZeldaWorldRewardBegin();
  if(pc==0x0683c1)ZeldaWorldSpritesEnd();
+ if(pc==0x088287)ZeldaWorldBombDamageBegin();
+ if(pc==0x08833c)ZeldaWorldAncillaBegin();
+ if(pc==0x08824c)ZeldaWorldAncillasEnd();
+}
+void ZeldaWorldBombDamageBegin(void) {
+ if(RtlGuestScopeActive()||!playable())return;
+ unsigned k=g_ram[0xfa0];if(k>=10||g_ram[0xc4a+k]!=7)return;
+ /* Capture the exact native damage phase, before its fuse/animation changes.
+  * Neighbor pools reuse only the enemy damage routine. The live bomb's
+  * movement, fuse, inventory cost, terrain and player damage still run once. */
+ memcpy(bomb_damage_image[k],g_ram,sizeof bomb_damage_image[k]);bomb_damage_mask|=(uint16_t)(1u<<k);
 }
 void ZeldaWorldRewardBegin(void) {
  if(!sim_area||!RtlGuestScopeActive())return;
@@ -344,6 +419,7 @@ void ZeldaWorldTransitionEnd(void) {
  live_scroll[0]=rd16(0xe0);live_scroll[1]=rd16(0xe2);live_scroll[2]=rd16(0xe6);live_scroll[3]=rd16(0xe8);
  sim_scroll_x=live_scroll[1];sim_scroll_y=live_scroll[3];
  r->piece_count=live_piece_count=0;live_first_actor=live_projection=true;
+ weapon_piece_count=0;weapon_projection=false;
 }
 /* Only these native player effects cross a neighbor transaction. Native
  * Sprite_Main owns enemy AI, sword hitboxes, damage/recoil and hit timers;
@@ -377,6 +453,13 @@ static bool tick_scope(void *opaque) {
  if(t->pool)t->pool->piece_count=0;else r->piece_count=0;
  sim_scroll_x=ax;sim_scroll_y=ay;
  wr16(0xe2,ax);wr16(0xe8,ay);wr16(0xe0,ax);wr16(0xe6,ay);
+ for(unsigned k=0;k<10;k++)if(bomb_damage_mask&(1u<<k)) {
+  const uint8_t*p=bomb_damage_image[k];
+  memcpy(g_ram+0x280,p+0x280,0x32);memcpy(g_ram+0x380,p+0x380,0x70);
+  memcpy(g_ram+0xbf0,p+0xbf0,0xaa);g_ram[0xfa0]=(uint8_t)k;
+  if(!call(0x088287,0x30,0,k,0))return false;
+ }
+ memset(g_ram+0xc4a,0,10);
  if(!call(0x00841e,0x30,0,0,0))return false;
  if(!call(0x068328,0x30,0,0,0))return false;
  collect_pieces(r,sim_scroll_x,sim_scroll_y);
@@ -423,6 +506,7 @@ void ZeldaWorldReset(void) {
  active_world=-1;decoded=failures=0;decode_ms=0;
  collision_window=false;last_area=-1;handoffs=0;
  live_projection=live_pieces_valid=false;live_piece_count=0;
+ weapon_piece_count=0;weapon_projection=false;
 }
 static uint16_t *world_tile(int wx,int wy,int world) {
  if(wx<0||wx>=ZW_WORLD||wy<0||wy>=ZW_WORLD)return NULL;
@@ -443,6 +527,7 @@ static void commit_collision(void) {
 }
 bool ZeldaWorldFrameBegin(uint32_t *inputs) {
  replay_boundary(inputs);
+ bomb_damage_mask=0;
  collision_window=false;
  if(!playable()||active_world<0){live_pieces_valid=false;live_piece_count=0;return true;}
  wr16(0x22,ZeldaWorldLinkCoordinate(rd16(0x22)));wr16(0x20,ZeldaWorldLinkCoordinate(rd16(0x20)));
@@ -461,6 +546,17 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs) {
 }
 static bool adopt_area(unsigned id,bool crossing) {
  WorldArea*r=areas[id];if(!r||!r->valid)return false;
+ NativeActor portal;int portal_slot=-1,destination=-1;
+ for(int k=15;k>=0;k--)if(g_ram[0xdd0+k]&&g_ram[0xe20+k]==0x6c){portal_slot=k;break;}
+ if(portal_slot>=0) {
+  read_actor(&portal,g_ram,(unsigned)portal_slot);
+  if(!r->ram[0xdd0+portal_slot])destination=portal_slot;
+  else for(int k=15;k>=0;k--)if(!r->ram[0xdd0+k]){destination=k;break;}
+  /* Match the original dynamic allocator's expendable guard-probe policy.
+   * Never silently overwrite a physical authored actor to retain a portal. */
+  if(destination<0)for(int k=15;k>=0;k--)if(r->ram[0xe20+k]==0x41&&r->ram[0xdb0+k]){destination=k;break;}
+  if(destination<0)return false;
+ }
  /* Only area-owned state crosses this handoff. Player action/stack, all
   * native progress/SRAM, input, audio, clocks and portal history stay live. */
  /* $0BF0..$0C99 is the player's global ancilla pool. Copying the whole
@@ -470,6 +566,7 @@ static bool adopt_area(unsigned id,bool crossing) {
  memcpy(g_ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(g_ram+0x4000,r->ram+0x4000,0x8000);
  memcpy(g_ram+0x1d000,r->ram+0x1d000,0x3000);
+ if(destination>=0)write_actor(g_ram,(unsigned)destination,&portal);
  memcpy(g_ram+0xaa0,r->ram+0xaa0,9);
  memcpy(g_ram+0xc2f8,r->ram+0xc2f8,8);
  memcpy(g_ram+0x600,r->ram+0x600,0x18);
@@ -502,6 +599,11 @@ void ZeldaWorldFrameEnd(void) {
  if(playable()&&live_pieces_valid&&areas[owner(rd16(0x8a))]) {
   live_piece_count=0;
   collect_oam(areas[owner(rd16(0x8a))],live_pieces,&live_piece_count,rd16(0xe2),rd16(0xe8));
+ }
+ if(playable())for(unsigned k=0;k<10;k++) {
+  unsigned type=g_ram[0xc4a+k];
+  if((type==1||type==2||type==5||type==7||type==9||type==11||type==31)&&
+    ((g_ram[0xc04+k]|g_ram[0xc18+k]<<8)>=ZW_WORLD||(g_ram[0xbfa+k]|g_ram[0xc0e + k]<<8)>=ZW_WORLD))g_ram[0xc4a+k]=0;
  }
  /* Native travel owns its destination and may have already repurposed the
   * tile buffer. Only an uninterrupted overworld frame can commit our window
@@ -536,6 +638,7 @@ void ZeldaWorldFrameEnd(void) {
    memcpy(g_ram+0xb00,areas[id]->ram+0xb00,0xf0);
    memcpy(g_ram+0xc9a,areas[id]->ram+0xc9a,0x366);
    memcpy(g_ram+0x1d000,areas[id]->ram+0x1d000,0x3000);
+   remove_cached_portals(areas[id]->ram);
   }else {free_pools(areas[id]);areas[id]->populated=false;failures++;}
  }
  collision_window=false;last_area=(int)id;
@@ -605,6 +708,7 @@ const uint32_t *ZeldaWorldPresent(const uint32_t *native,int native_pitch,
  /* Native OAM supplies Link, followers, local actors and items; world-space
   * projection removes the native scene rectangle and its 9-bit view limit. */
  WorldArea*r=areas[active_id];
+ if(r&&live_pieces_valid)for(unsigned i=weapon_piece_count;i--;)draw_piece(r,&weapon_pieces[i],w,h);
  if(r&&live_pieces_valid)for(unsigned i=live_piece_count;i--;)draw_piece(r,&live_pieces[i],w,h);
  else if(r)for(int i=127;i>=0;i--) {
   unsigned off=0x800+(unsigned)i*4,xy=g_ram[off]|g_ram[off+1]<<8,cf=g_ram[off+2]|g_ram[off+3]<<8;
@@ -697,11 +801,15 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
    * This never synthesizes desktop input or changes another window. */
   int w,h;
   if(!strcmp(args,"f4"))ui_key(SDLK_F4);
+  else if(!strcmp(args,"gpu-capture")&&g_config.output_method==kOutputMethod_OpenGL)
+   OpenGLRenderer_RequestScreenshot();
   else if(!strcmp(args,"wheel-up")||!strcmp(args,"wheel-down")) {
    SDL_Event e={0};e.type=SDL_MOUSEWHEEL;e.wheel.y=!strcmp(args,"wheel-up")?1:-1;SDL_PushEvent(&e);
   }else if(sscanf(args,"pause-resize %d %d",&w,&h)==2&&world_window&&w>=240&&h>=240&&w<=4096&&h<=4096) {
    ui_resume_deadline=SDL_GetPerformanceCounter()+SDL_GetPerformanceFrequency()*5;
    SDL_SetWindowSize(world_window,w,h);ui_key(SDLK_p);
+  }else if(sscanf(args,"resize %d %d",&w,&h)==2&&world_window&&w>=240&&h>=240&&w<=4096&&h<=4096) {
+   SDL_SetWindowSize(world_window,w,h);
   }else {send("{\"error\":\"use f4, wheel-up, wheel-down or pause-resize W H (resumes after 5s)\"}");return 1;}
   snprintf(line,sizeof line,"{\"ok\":true,\"process_local_ui_event\":true}");
  }else if(!strcmp(cmd,"world_edge")) {
@@ -746,10 +854,11 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   areas[owner(id)]->ram[0xe90+k]=0;
   snprintf(line,sizeof line,"{\"ok\":true,\"bypassed_hidden_pickup_prerequisite\":true}");
  }else if(!strcmp(cmd,"world_qa_item")) {
-  unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"hookshot")?10:0;
-  if(!item){send("{\"error\":\"use bombs, boomerang, bow or hookshot\"}");return 1;}
+  unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"hookshot")?10:!strcmp(args,"mirror")?20:0;
+  if(!item){send("{\"error\":\"use bombs, boomerang, bow, hookshot or mirror\"}");return 1;}
   g_ram[0x303]=g_ram[0x304]=(uint8_t)item;
   g_ram[0xf340]=3;g_ram[0xf341]=g_ram[0xf342]=1;g_ram[0xf343]=10;g_ram[0xf377]=50;
+  if(item==20)g_ram[0xf353]=2;
   snprintf(line,sizeof line,"{\"ok\":true,\"assisted_inventory_selection\":%u}",item);
  }else if(!strcmp(cmd,"world_place_actor")) {
   unsigned id,k,x,y,dir=4;
@@ -763,7 +872,10 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
  }else if(!strcmp(cmd,"world_player")) {
   int n=snprintf(line,sizeof line,"{\"health\":%u,\"pending_damage\":%u,\"invulnerability\":%u,\"recoil_timer\":%u,\"aux_state\":%u,\"sword\":%u,\"sword_frame\":%u,\"bombs\":%u,\"bomb_filler\":%u,\"arrows\":%u,\"rupees\":%u,\"rupee_goal\":%u,\"ancillas\":[",g_ram[0xf36d],g_ram[0x373],g_ram[0x31f],g_ram[0x46],g_ram[0x4d],g_ram[0xf359],g_ram[0x3c],g_ram[0xf343],g_ram[0xf375],g_ram[0xf377],rd16(0xf362),rd16(0xf360));
   bool first=true;for(unsigned k=0;k<10;k++)if(g_ram[0xc4a+k]) {
-   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"x\":%u,\"y\":%u,\"timer\":%u}",first?"":",",k,g_ram[0xc4a+k],g_ram[0xc04+k]|((unsigned)g_ram[0xc18+k]<<8),g_ram[0xbfa+k]|((unsigned)g_ram[0xc0e + k]<<8),g_ram[0xc68+k]);first=false;
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"stage\":%u,\"fuse\":%u}",first?"":",",k,g_ram[0xc4a+k],g_ram[0xc04+k]|((unsigned)g_ram[0xc18+k]<<8),g_ram[0xbfa+k]|((unsigned)g_ram[0xc0e + k]<<8),g_ram[0xc68+k],g_ram[0xc5e + k],g_ram[0x39f+k]);first=false;
+  }n+=snprintf(line+n,sizeof line-(size_t)n,"],\"weapon_pieces\":%u,\"player_layer\":%u,\"player_handler\":%u,\"player_bits\":%u,\"player_pose\":%u,\"portals\":[",weapon_piece_count,g_ram[0xee],g_ram[0x5d],g_ram[0x3a],g_ram[0x2e9]);
+  first=true;for(unsigned k=0;k<16;k++)if(g_ram[0xdd0+k]&&g_ram[0xe20+k]==0x6c) {
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"x\":%u,\"y\":%u,\"A\":%u,\"B\":%u,\"layer\":%u,\"state\":%u,\"flags2\":%u}",first?"":",",k,g_ram[0xd10+k]|g_ram[0xd30+k]<<8,g_ram[0xd00+k]|g_ram[0xd20+k]<<8,g_ram[0xd90+k],g_ram[0xda0+k],g_ram[0xf20+k],g_ram[0xdd0+k],g_ram[0xe40+k]);first=false;
   }snprintf(line+n,sizeof line-(size_t)n,"]}");
  }else if(!strcmp(cmd,"world_view")) {
   atlas=!strcmp(args,"atlas");if(!strcmp(args,"off"))enabled=false;else enabled=true;
@@ -856,6 +968,8 @@ typedef struct WorldStateHeader {
  uint64_t handoffs;
  uint32_t global_count,global_valid;
  WorldPiece global_pieces[1024];
+ uint32_t weapon_count,weapon_reserved;
+ WorldPiece weapon_pieces[1024];
 } WorldStateHeader;
 typedef struct WorldRecordHeader {
  uint32_t id,pieces,obsel,reserved;
@@ -892,7 +1006,7 @@ static void clear_pending(void) {
  }
  pending_load_ok=false;
 }
-const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v2":NULL;}
+const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v3":NULL;}
 static void area_stream(SaveLoadInfo*sli,WorldArea*r) {
  sli->func(sli,r->ram,sizeof r->ram);sli->func(sli,r->vram,sizeof r->vram);
  sli->func(sli,r->palette,sizeof r->palette);sli->func(sli,r->tiles,sizeof r->tiles);
@@ -903,10 +1017,11 @@ static void pool_stream(SaveLoadInfo*sli,WorldActorPool*p) {
 }
 void ZeldaWorldStateSave(SaveLoadInfo*sli) {
  if(!enabled)return;
- WorldStateHeader h={WORLD_STATE_MAGIC,2,0,(uint32_t)record_bytes(),
+ WorldStateHeader h={WORLD_STATE_MAGIC,3,0,(uint32_t)record_bytes(),
   active_world,last_area,zoom,atlas,camera_x,camera_y,native_oam_x,native_oam_y,handoffs};
  h.global_count=live_piece_count;h.global_valid=live_pieces_valid;
  memcpy(h.global_pieces,live_pieces,live_piece_count*sizeof(*live_pieces));
+ h.weapon_count=weapon_piece_count;memcpy(h.weapon_pieces,weapon_pieces,weapon_piece_count*sizeof(*weapon_pieces));
  for(unsigned i=0;i<ZW_AREAS;i++)h.count+=areas[i]&&areas[i]->valid;
  sli->func(sli,&h,sizeof h);
  for(unsigned i=0;i<ZW_AREAS;i++)if(areas[i]&&areas[i]->valid) {
@@ -925,11 +1040,14 @@ bool ZeldaWorldStatePreflight(const void*data,size_t size) {
  if(!core||core>size||size-core<sizeof(WorldStateHeader))return false;
  const uint8_t*p=(const uint8_t*)data+core;
  WorldStateHeader h;memcpy(&h,p,sizeof h);p+=sizeof h;
- if(h.magic!=WORLD_STATE_MAGIC||h.schema!=2||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
+ if(h.magic!=WORLD_STATE_MAGIC||h.schema!=3||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
     (h.world!=-1&&h.world!=0&&h.world!=64)||h.zoom<1||h.zoom>8||(h.atlas!=0&&h.atlas!=1)||
-    h.last < -1||h.last>=ZW_AREAS||h.global_count>1024||h.global_valid>1)return false;
+    h.last < -1||h.last>=ZW_AREAS||h.global_count>1024||h.global_valid>1||h.weapon_count>1024||h.weapon_reserved)return false;
  for(unsigned j=0;j<h.global_count;j++) {
   unsigned n=h.global_pieces[j].size;if(n!=8&&n!=16&&n!=32&&n!=64)return false;
+ }
+ for(unsigned j=0;j<h.weapon_count;j++) {
+  unsigned n=h.weapon_pieces[j].size;if(n!=8&&n!=16&&n!=32&&n!=64)return false;
  }
  StateCount exec=execution_layout();
  size_t expected=sizeof h+(size_t)h.count*record_bytes()+exec.bytes;
@@ -996,6 +1114,7 @@ void ZeldaWorldStateLoaded(uint32_t version) {
   handoffs=pending_header.handoffs;decoded=pending_header.count;
   live_piece_count=pending_header.global_count;live_pieces_valid=pending_header.global_valid!=0;
   memcpy(live_pieces,pending_header.global_pieces,live_piece_count*sizeof(*live_pieces));
+  weapon_piece_count=pending_header.weapon_count;memcpy(weapon_pieces,pending_header.weapon_pieces,weapon_piece_count*sizeof(*weapon_pieces));
   held_transition_velocity=false;collision_window=false;
   RtlApplyExecutionState();ppu_rasterReset();
  }
@@ -1020,6 +1139,12 @@ static ReplayDigest replay_digest(const uint8_t*p,size_t n) {
 static void replay_release(void) {
  free(replay.checkpoint);free(replay.scratch);free(replay.final);
  replay.checkpoint=replay.scratch=replay.final=NULL;
+}
+void ZeldaWorldHardwareReset(void) {
+ /* A user reset cancels a developer replay. Loading its current-build
+  * checkpoint still uses StateLoaded and must not cancel that replay. */
+ replay_release();memset(&replay,0,sizeof replay);ui_resume_deadline=0;
+ ZeldaWorldReset();
 }
 static void replay_boundary(uint32_t*inputs) {
  if(replay.phase<1||replay.phase>3)return;

@@ -18,6 +18,10 @@ floor. Ordinary crossings become seamless; special entrances, stairs, pits,
 warps, Mirror and world changes keep native routing. Cross-boundary combat
 and projectiles are completion gates, not assumed from moving neighbors.
 
+The independent world canvas uses square pixels, matching the NES experiment's
+pixel zoom. Native fallback screens retain the title's existing pixel aspect
+in both SDL software and OpenGL presenters.
+
 Preserve stock/adaptive rendering, MSU audio and native SRAM. Current-build
 states/rewind/rollback must work; old build states have no compatibility
 promise. No netplay qualification is implied.
@@ -31,9 +35,9 @@ promise. No netplay qualification is implied.
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and centered HUD. 512x288 follow, 4096x4128 atlas and paused 300x500 portrait captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage and ordinary pickup reward publication demonstrated across an edge. Global ancillas survive a handoff. Full projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and inter-pool interactions remain open. |
+| 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb explosion damage and ordinary pickup reward publication demonstrated across an edge. Global ancillas survive a handoff and project outside the old viewport. Full projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and inter-pool interactions remain open. |
 | 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18→19 replay byte-identically. Menu/dialogue/effects/death/Continue/portal qualification remains open. |
+| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18→19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
@@ -80,6 +84,16 @@ neighbor loading does not clone it. Per-actor camera projection also runs in
 the active area so its distant actors do not disappear through native view
 culling. Link is collected after the original Module09's final LinkOam draw.
 
+`profiles/native-mirror-seam-v4/result.json` records a real Y-button Mirror
+journey from Dark World area 82 to Light World area 18, controller crossings
+18 to 19 and back, then native portal contact returning to area 82. The
+single live portal survives handoffs and a byte-exact 20-frame replay; area
+caches contain no portal clones. The initial exit/equipment/position setup
+and moving physical guards away are explicit assists. Earlier failed probes
+are retained: native Mirror immunity and subsequent guard damage blocked
+portal contact until their blink timers expired; they are not counted as
+successful portal routing checks.
+
 `profiles/seam-sword-protected/result.json` demonstrates the neighboring
 guard's health changing 6 to 4 while Link stays in area 18 and the guard stays
 across its eastern edge. Player protection is an explicit test assist.
@@ -88,6 +102,21 @@ reaching Link across the same edge. The ordinary pickup probe increased bombs
 0 to 8; it explicitly bypassed the authored item's hidden-under-a-rock
 prerequisite, so lifting/destructible terrain remains unverified.
 
+`profiles/native-seam-bomb/result.json` records a real bomb explosion across
+the area 18/19 edge: the neighboring native guard receives pending damage 4
+and health falls from 6 to 2 while Link remains in area 18. Only equipment,
+protection and the existing guard's position/facing were assisted. Each
+neighbor reuses the original enemy-damage routine at the captured explosion
+phase; bomb movement, fuse, inventory cost and player damage run once.
+
+`profiles/weapon-projection-v4/result.json` records an arrow traveling beyond
+the original viewport while Link remains fixed, zero scoped failures, exact
+scope restoration, and a 30-frame byte-exact replay. Both native camera-copy
+sets and the original OAM allocator are restored after weapon projection.
+This is presentation/lifetime evidence, not a passed cross-area arrow damage
+gate. State schema/feature identity is now `alttp-world-v3` and includes the
+projected weapon pieces. A hardware reset cancels a developer replay.
+
 `profiles/viewport-input-qualification/commands.jsonl` records actual process
 SDL F4 and wheel events. F4 toggles the atlas without loading a deliberately
 different save slot 4; zoom changes 3 to 2 and back. `profiles/paused-portrait-v3/result.json`
@@ -95,6 +124,13 @@ records the actual 900x1500 window producing a 300x500 canvas, the same native
 frame/RAM while paused, and resumed frame progress. The test helper schedules
 the existing host pause command on the main loop; physical controls remain an
 owner handoff check. Native raster/IRQ rendering is not repeated while paused.
+
+`profiles/opengl-world` retains actual GPU framebuffer readbacks of follow
+and full atlas views. `profiles/opengl-portrait` verifies a 900x1500 window:
+native image top/bottom margins 356/356, atlas margins 297/296, and a filled
+follow canvas. The title's OpenGL presenter now centers its viewport on both
+axes. Hidden-window, dummy-audio QA preserves desktop focus; owner launches
+retain normal visibility and audio defaults.
 
 `profiles/world-boundaries/result.json` records eight assisted boundary cases
 in Light/Dark Worlds: bottom/right overflow and north/west underflow clamp

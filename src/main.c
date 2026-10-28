@@ -279,7 +279,9 @@ void NORETURN Die(const char *error) {
    * includes it and preserves a timestamped crash copy (see
    * host_report_has_fatal in post_mortem.c). */
   host_report_fatal(error);
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
+  const char *hidden_qa=getenv("SNESRECOMP_QA_HIDDEN_WINDOW");
+  if (!hidden_qa || hidden_qa[0]!='1')
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
   exit(1);
 }
@@ -1346,6 +1348,8 @@ error_reading:;
 #endif
 
   /* SDL3 dropped the x/y arguments from SDL_CreateWindow. */
+  { const char *hidden_qa=getenv("SNESRECOMP_QA_HIDDEN_WINDOW");
+    if(hidden_qa&&hidden_qa[0]=='1')g_win_flags|=SDL_WINDOW_HIDDEN; }
   SDL_Window *window = snesrecomp_sdl_create_window(
       kWindowTitle, window_width, window_height, g_win_flags);
   if(window == NULL) {
