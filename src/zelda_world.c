@@ -15,8 +15,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { ZW_AREAS=128, ZW_MAP=4096, ZW_WORLD=4096, ZW_HUD=32 };
+enum { ZW_AREAS=128, ZW_MAP=4096, ZW_WORLD=4096, ZW_HUD=32, ZW_EXTRA_POOLS=8 };
 typedef struct WorldPiece {int16_t x,y;uint16_t tile;uint8_t flags,size;} WorldPiece;
+/* Eight authored actors leave native slots for probes, enemy missiles and
+ * other dynamic children. Each additional pool keeps an independent native
+ * context; terrain, graphics and persistent player progress remain shared. */
+typedef struct WorldActorPool {
+ uint8_t ram[0x20000];
+ WorldPiece pieces[1024];
+ uint64_t ticks;
+ unsigned piece_count;
+ struct WorldActorPool *next;
+} WorldActorPool;
 /* ROM's canonical area-head table, not a rectangular room-ID assumption.
  * Each cell is 512px. Four cells may share one 1024px native area. */
 static const uint8_t heads[64]={
@@ -34,7 +44,8 @@ typedef struct WorldArea {
   WorldPiece pieces[1024];
   unsigned piece_count;
   uint8_t obsel;
-  bool valid, dirty;
+  bool valid, dirty, populated;
+  WorldActorPool *pools;
 } WorldArea;
 static WorldArea *areas[ZW_AREAS];
 static bool enabled, atlas;
@@ -53,7 +64,13 @@ static uint64_t handoffs;
 static int native_oam_x,native_oam_y;
 static unsigned last_call;
 static WorldArea *sim_area;
+static WorldActorPool *sim_pool;
 static bool sim_reward;
+static bool live_projection,live_first_actor,live_pieces_valid;
+static unsigned live_area,live_piece_count;
+static WorldPiece live_pieces[1024];
+static uint16_t live_scroll[4];
+static uint8_t live_native_oam[0x2a0];
 static int sim_scroll_x,sim_scroll_y;
 static uint64_t actor_hooks;
 static bool held_transition_velocity;
@@ -61,6 +78,8 @@ static uint8_t held_vx,held_vy;
 extern void (*g_interp_bridge_pc_hook)(uint32_t,int,int);
 static void (*previous_pc_hook)(uint32_t,int,int);
 static SDL_mutex *command_mutex;
+static SDL_Window *world_window;
+static uint64_t ui_resume_deadline;
 static bool command_pending,command_ready;
 static char pending_command[64],pending_args[512],command_reply[4096];
 static void service_commands(void);
@@ -88,7 +107,7 @@ static bool call(unsigned pc,unsigned p,unsigned a,unsigned x,unsigned y) {
    * stops when RTS/RTL returns past its entry, before executing the sentinel.
    * Widths are the original entry ABI, never inherited from another loader. */
   last_call=pc;
-  unsigned frame=pc==0x00e19b||pc==0x00d394||pc==0x0ed5a8||pc==0x09c499||pc==0x068328?3:2;
+  unsigned frame=pc==0x00e19b||pc==0x00d394||pc==0x0ed5a8||pc==0x09c499||pc==0x09c22f||pc==0x068328?3:2;
   g_cpu.S=(uint16_t)(0x1ff-frame);g_cpu.D=0;g_cpu.DB=(uint8_t)(pc>>16);g_cpu.PB=(uint8_t)(pc>>16);
   g_cpu.P=(uint8_t)(p|4);g_cpu.emulation=0;cpu_p_to_mirrors(&g_cpu);
   g_cpu.A=(uint16_t)a;g_cpu.X=(uint16_t)x;g_cpu.Y=(uint16_t)y;
@@ -141,6 +160,58 @@ static void capture(unsigned id) {
  r->obsel=g_ppu->obsel;
  r->valid=true;
 }
+static void free_pools(WorldArea*r) {
+ while(r->pools){WorldActorPool*p=r->pools;r->pools=p->next;free(p);}
+}
+static unsigned pool_count(const WorldArea*r) {
+ unsigned n=0;for(WorldActorPool*p=r->pools;p;p=p->next)n++;return n;
+}
+static bool populate_native(WorldArea*r,bool keep_live) {
+ free_pools(r);
+ if(!keep_live) {
+  /* Sprite_DisableAll intentionally preserves the unique live Mirror portal.
+   * A decoded neighbor must not clone that portal into every native area. */
+  memset(g_ram+0xdd0,0,16);memset(g_ram+0xb00,0,8);
+  memset(g_ram+0x1ef80,0,512);
+ }
+ WorldActorPool*pool=NULL;unsigned pools=0;
+ for(unsigned blk=0;blk<4096;blk++) {
+  if(!g_ram[0x1df80+blk]||(g_ram[0x1ef80+(blk>>3)]&(0x80>>(blk&7))))continue;
+  for(unsigned attempt=0;attempt<2;attempt++) {
+   unsigned actors=0,overlords=0;
+   for(unsigned k=0;k<16;k++)actors+=g_ram[0xdd0+k]!=0;
+   for(unsigned k=0;k<8;k++)overlords+=g_ram[0xb00+k]!=0;
+   if(actors>=8||overlords>=6||attempt) {
+    if(pools>=ZW_EXTRA_POOLS)return false;
+    memcpy(pool?pool->ram:r->ram,g_ram,0x20000);
+    WorldActorPool*p=calloc(1,sizeof(*p));if(!p)return false;
+    if(pool)pool->next=p;else r->pools=p;
+    pool=p;pools++;
+    /* Reset native per-pool bookkeeping without resetting the authored map
+     * or its shared loaded bits. No player or live portal is being reset. */
+    g_ram[0x1b]=1;
+    if(!call(0x09c22f,0x30,0,0,0))return false;
+    g_ram[0x1b]=0;
+    memset(g_ram+0x1d00,0,0x100);
+   }
+   wr16(0,blk);
+   if(!call(0x09c739,0x30,0,0,0))return false;
+   if(g_ram[0x1ef80+(blk>>3)]&(0x80>>(blk&7)))break;
+   if(attempt)return false;
+  }
+ }
+ memcpy(pool?pool->ram:r->ram,g_ram,0x20000);
+ /* Native proximity loading now sees every authored spawn as resident,
+  * including actors that live in another pool of this same area. */
+ uint8_t loaded[512];memcpy(loaded,g_ram+0x1ef80,sizeof loaded);
+ memcpy(r->ram+0x1ef80,loaded,sizeof loaded);
+ for(WorldActorPool*p=r->pools;p;p=p->next)memcpy(p->ram+0x1ef80,loaded,sizeof loaded);
+ memcpy(g_ram,r->ram,0x20000);r->populated=true;return true;
+}
+static bool populate_scope(void*opaque) {
+ WorldArea*r=opaque;memcpy(g_ram,r->ram,sizeof r->ram);
+ return populate_native(r,true);
+}
 typedef struct Decode {unsigned id;WorldArea *area;} Decode;
 static bool decode_scope(void *opaque) {
  Decode *d=opaque;unsigned id=d->id;WorldArea *r=d->area;
@@ -159,6 +230,7 @@ static bool decode_scope(void *opaque) {
  memcpy(g_ppu->vram+0x3c00,g_ram+0xa680,0x400);
  wr16(0xe2,(id&7)*512+128);wr16(0xe8,((id&63)>>3)*512+128);
  if(!call(0x09c499,0x30,0,0,0))return false;
+ if(!populate_native(r,false))return false;
  memcpy(r->ram,g_ram,sizeof r->ram);
  memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);
  memcpy(r->vram,g_ppu->vram,sizeof r->vram);
@@ -178,20 +250,28 @@ static bool ensure(unsigned id) {
  if(ok){r->valid=r->dirty=true;decoded++;}else failures++;
  return ok;
 }
-static void collect_pieces(WorldArea *r,int scroll_x,int scroll_y) {
+static void collect_oam(WorldArea *r,WorldPiece*pieces,unsigned*count,int scroll_x,int scroll_y) {
  static const uint8_t sizes[8][2]={{8,16},{8,32},{8,64},{16,32},{16,64},{32,64},{16,32},{16,32}};
- for(unsigned i=0;i<128&&r->piece_count<1024;i++) {
+ for(unsigned i=0;i<128&&*count<1024;i++) {
   unsigned off=0x800+i*4,ext=g_ram[0xa20+i];
   if(g_ram[off+1]>=224)continue;
   int x=g_ram[off]|((ext&1)<<8);if(x>=256)x-=512;
-  WorldPiece*p=&r->pieces[r->piece_count++];
+  WorldPiece*p=&pieces[(*count)++];
   p->x=(int16_t)(scroll_x+x);p->y=(int16_t)(scroll_y+g_ram[off+1]);
   p->tile=g_ram[off+2];p->flags=g_ram[off+3];p->size=sizes[(r->obsel>>5)&7][(ext>>1)&1];
  }
 }
+static void collect_pieces(WorldArea *r,int scroll_x,int scroll_y) {
+ collect_oam(r,sim_pool?sim_pool->pieces:r->pieces,
+   sim_pool?&sim_pool->piece_count:&r->piece_count,scroll_x,scroll_y);
+}
 void ZeldaWorldActorBegin(void) {
- if(!sim_area||!RtlGuestScopeActive())return;
- collect_pieces(sim_area,sim_scroll_x,sim_scroll_y);
+ WorldArea*r=RtlGuestScopeActive()?sim_area:live_projection?areas[live_area]:NULL;
+ if(!r)return;
+ if(live_projection&&!RtlGuestScopeActive()&&live_first_actor) {
+  collect_oam(r,live_pieces,&live_piece_count,sim_scroll_x,sim_scroll_y);
+  memcpy(live_native_oam,g_ram+0x800,sizeof live_native_oam);live_first_actor=false;
+ }else collect_pieces(r,sim_scroll_x,sim_scroll_y);
  unsigned k=g_ram[0xfa0]&15;
  int x=g_ram[0xd10+k]|g_ram[0xd30+k]<<8,y=g_ram[0xd00+k]|g_ram[0xd20+k]<<8;
  sim_scroll_x=x-128;sim_scroll_y=y-112;
@@ -204,6 +284,14 @@ void ZeldaWorldActorBegin(void) {
  memcpy(g_ram+0xfe0,RomPtr(0x0683c7),12);
  actor_hooks++;
 }
+void ZeldaWorldSpritesEnd(void) {
+ if(!live_projection||RtlGuestScopeActive())return;
+ collect_pieces(areas[live_area],sim_scroll_x,sim_scroll_y);
+ wr16(0xe0,live_scroll[0]);wr16(0xe2,live_scroll[1]);wr16(0xe6,live_scroll[2]);wr16(0xe8,live_scroll[3]);
+ memcpy(g_ram+0x800,live_native_oam,sizeof live_native_oam);
+ areas[live_area]->ticks++;
+ live_projection=false;live_pieces_valid=true;
+}
 static void world_pc_hook(uint32_t pc,int m,int x) {
  if(previous_pc_hook)previous_pc_hook(pc,m,x);
  pc&=0x7fffff;
@@ -211,6 +299,7 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x02a9c4)ZeldaWorldTransitionBegin();
  if(pc==0x068328)ZeldaWorldTransitionEnd();
  if(pc==0x06d13c)ZeldaWorldRewardBegin();
+ if(pc==0x0683c1)ZeldaWorldSpritesEnd();
 }
 void ZeldaWorldRewardBegin(void) {
  if(!sim_area||!RtlGuestScopeActive())return;
@@ -228,8 +317,13 @@ void ZeldaWorldTransitionBegin(void) {
  g_ram[0x30]=g_ram[0x31]=0;wr16(0x416,0);
 }
 void ZeldaWorldTransitionEnd(void) {
- if(!held_transition_velocity||RtlGuestScopeActive())return;
- g_ram[0x30]=held_vy;g_ram[0x31]=held_vx;held_transition_velocity=false;
+ if(RtlGuestScopeActive())return;
+ if(held_transition_velocity){g_ram[0x30]=held_vy;g_ram[0x31]=held_vx;held_transition_velocity=false;}
+ if(live_projection||!playable())return;
+ live_area=owner(rd16(0x8a));WorldArea*r=areas[live_area];if(!r||!r->valid)return;
+ live_scroll[0]=rd16(0xe0);live_scroll[1]=rd16(0xe2);live_scroll[2]=rd16(0xe6);live_scroll[3]=rd16(0xe8);
+ sim_scroll_x=live_scroll[1];sim_scroll_y=live_scroll[3];
+ r->piece_count=live_piece_count=0;live_first_actor=live_projection=true;
 }
 /* Only these native player effects cross a neighbor transaction. Native
  * Sprite_Main owns enemy AI, sword hitboxes, damage/recoil and hit timers;
@@ -238,12 +332,15 @@ void ZeldaWorldTransitionEnd(void) {
 static const uint16_t combat_effects[]={0x27,0x28,0x46,0x4d,0x2e3,0x31f,0x360,0x373};
 typedef struct Tick {
  unsigned id;int player_x,player_y;
+ WorldActorPool *pool;
  uint8_t player[0x60],action[0xb0],progress[0x1000],effect[sizeof combat_effects/sizeof *combat_effects];
  uint8_t frame,sfx[3],rewards[0x1a];bool reward;
 } Tick;
 static bool tick_scope(void *opaque) {
  Tick*t=opaque;WorldArea*r=areas[t->id];
- memcpy(g_ram,r->ram,sizeof r->ram);
+ memcpy(g_ram,t->pool?t->pool->ram:r->ram,sizeof r->ram);
+ memcpy(g_ram+0x2000,r->tiles,sizeof r->tiles);
+ memset(g_ram+0x1ef80,0xff,512);
  memcpy(g_ppu->vram,r->vram,sizeof r->vram);memcpy(g_ppu->cgram,r->palette,sizeof r->palette);
  memcpy(g_ram+0xf000,t->progress,sizeof t->progress);memcpy(g_ram+0x20,t->player,sizeof t->player);
  memcpy(g_ram+0x2d0,t->action,sizeof t->action);
@@ -257,7 +354,8 @@ static bool tick_scope(void *opaque) {
  int ax=(t->id&7)*512,ay=((t->id&63)>>3)*512;
  wr16(0x708,ay);wr16(0x70c,ax>>3);wr16(0x70a,r->size-16);wr16(0x70e,(r->size-16)>>3);
  wr16(0x22,t->player_x);wr16(0x20,t->player_y);
- r->piece_count=0;sim_scroll_x=ax;sim_scroll_y=ay;
+ if(t->pool)t->pool->piece_count=0;else r->piece_count=0;
+ sim_scroll_x=ax;sim_scroll_y=ay;
  wr16(0xe2,ax);wr16(0xe8,ay);wr16(0xe0,ax);wr16(0xe6,ay);
  if(!call(0x00841e,0x30,0,0,0))return false;
  if(!call(0x068328,0x30,0,0,0))return false;
@@ -266,13 +364,15 @@ static bool tick_scope(void *opaque) {
  memcpy(t->sfx,g_ram+0x12d,3);
  t->reward=sim_reward&&g_ram[0x10]==9&&g_ram[0x11]==0;
  memcpy(t->rewards,g_ram+0xf360,sizeof t->rewards);
+ memset(g_ram+0x1ef80,0xff,512);
  if(memcmp(r->tiles,g_ram+0x2000,sizeof r->tiles)){memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);r->dirty=true;}
- memcpy(r->ram,g_ram,sizeof r->ram);r->ticks++;
+ memcpy(t->pool?t->pool->ram:r->ram,g_ram,sizeof r->ram);
+ if(t->pool)t->pool->ticks++;else r->ticks++;
  return true;
 }
-static void tick_area(unsigned id) {
+static void tick_pool(unsigned id,WorldActorPool*pool) {
  if(!ensure(id))return;
- Tick t={0};t.id=id;t.player_x=rd16(0x22);t.player_y=rd16(0x20);t.frame=g_ram[0x1a];
+ Tick t={0};t.id=id;t.pool=pool;t.player_x=rd16(0x22);t.player_y=rd16(0x20);t.frame=g_ram[0x1a];
  memcpy(t.player,g_ram+0x20,sizeof t.player);memcpy(t.progress,g_ram+0xf000,sizeof t.progress);
  memcpy(t.action,g_ram+0x2d0,sizeof t.action);
  uint8_t before[sizeof t.effect],sfx_before[3];
@@ -280,23 +380,29 @@ static void tick_area(unsigned id) {
  memcpy(sfx_before,g_ram+0x12d,3);
  /* The scoped machine starts with the live pending SFX, so only a native
   * attack's changed queue entry is published after restoration. */
- memcpy(areas[id]->ram+0x12d,sfx_before,3);
- sim_area=areas[id];sim_reward=false;
+ memcpy((pool?pool->ram:areas[id]->ram)+0x12d,sfx_before,3);
+ sim_area=areas[id];sim_pool=pool;sim_reward=false;
  if(!RtlGuestScopeRun(tick_scope,&t,1000000))failures++;
  else {
   for(unsigned i=0;i<sizeof combat_effects/sizeof *combat_effects;i++)if(t.effect[i]!=before[i])g_ram[combat_effects[i]]=t.effect[i];
   for(unsigned i=0;i<3;i++)if(t.sfx[i]!=sfx_before[i])g_ram[0x12d+i]=t.sfx[i];
   if(t.reward)for(unsigned i=0;i<sizeof t.rewards;i++)if(t.rewards[i]!=t.progress[0x360+i])g_ram[0xf360+i]=t.rewards[i];
  }
- sim_area=NULL;
+ sim_area=NULL;sim_pool=NULL;
+}
+static void tick_area(unsigned id,bool base) {
+ if(!ensure(id))return;
+ if(base)tick_pool(id,NULL);
+ for(WorldActorPool*p=areas[id]->pools;p;p=p->next)tick_pool(id,p);
 }
 bool ZeldaWorldEnabled(void){return enabled;}
 void ZeldaWorldEnable(void){enabled=true;}
 void ZeldaWorldDisable(void){enabled=false;ZeldaWorldReset();}
 void ZeldaWorldReset(void) {
- for(unsigned i=0;i<ZW_AREAS;i++){if(areas[i]){free(areas[i]->raster);free(areas[i]);areas[i]=NULL;}}
+ for(unsigned i=0;i<ZW_AREAS;i++){if(areas[i]){free_pools(areas[i]);free(areas[i]->raster);free(areas[i]);areas[i]=NULL;}}
  active_world=-1;decoded=failures=0;decode_ms=0;
  collision_window=false;last_area=-1;handoffs=0;
+ live_projection=live_pieces_valid=false;live_piece_count=0;
 }
 static uint16_t *world_tile(int wx,int wy,int world) {
  if(wx<0||wx>=ZW_WORLD||wy<0||wy>=ZW_WORLD)return NULL;
@@ -318,7 +424,7 @@ static void commit_collision(void) {
 bool ZeldaWorldFrameBegin(uint32_t *inputs) {
  replay_boundary(inputs);
  collision_window=false;
- if(!playable()||active_world<0)return true;
+ if(!playable()||active_world<0){live_pieces_valid=false;live_piece_count=0;return true;}
  collision_x=clamp(((int)rd16(0x22)-256)/512*512,0,3072);
  collision_y=clamp(((int)rd16(0x20)-256)/512*512,0,3072);
  collision_world=active_world;
@@ -367,7 +473,15 @@ static bool adopt_area(unsigned id,bool crossing) {
  if(crossing)handoffs++;return true;
 }
 void ZeldaWorldFrameEnd(void) {
- ZeldaWorldTransitionEnd();
+ ZeldaWorldSpritesEnd();
+ if(held_transition_velocity){g_ram[0x30]=held_vy;g_ram[0x31]=held_vx;held_transition_velocity=false;}
+ /* Module09 draws Link AFTER Sprite_Main, using the restored native camera.
+  * The native OAM prefix contains global actors/weapons plus that final Link
+  * draw; the per-area lists contain the independently projected enemies. */
+ if(playable()&&live_pieces_valid&&areas[owner(rd16(0x8a))]) {
+  live_piece_count=0;
+  collect_oam(areas[owner(rd16(0x8a))],live_pieces,&live_piece_count,rd16(0xe2),rd16(0xe8));
+ }
  /* Native travel owns its destination and may have already repurposed the
   * tile buffer. Only an uninterrupted overworld frame can commit our window
   * or choose a geographic handoff. Menus/travel resume through capture. */
@@ -389,23 +503,39 @@ void ZeldaWorldFrameEnd(void) {
  unsigned id=owner(rd16(0x8a));active_world=id&64;
  if(!areas[id]){areas[id]=calloc(1,sizeof(WorldArea));if(!areas[id])return;areas[id]->size=area_size(id);}
  if(!continuous)collision_window=false;
+ if(areas[id]->populated)memset(g_ram+0x1ef80,0xff,512);
  capture(id);
+ if(!areas[id]->populated) {
+  if(RtlGuestScopeRun(populate_scope,areas[id],2000000)) {
+   /* Publish the populated base pool while preserving global ancillas. */
+   memcpy(g_ram+0xb00,areas[id]->ram+0xb00,0xf0);
+   memcpy(g_ram+0xc9a,areas[id]->ram+0xc9a,0x366);
+   memcpy(g_ram+0x1d000,areas[id]->ram+0x1d000,0x3000);
+  }else failures++;
+ }
  collision_window=false;last_area=(int)id;
  uint64_t before=SDL_GetPerformanceCounter();
  int w=clamp(drawable_w/zoom,128,ZW_WORLD),h=clamp(drawable_h/zoom-ZW_HUD,64,ZW_WORLD);
  int x=(int)rd16(0x22),y=(int)rd16(0x20);
  for(unsigned next=(unsigned)active_world;next<(unsigned)active_world+64;next++) {
-  if(next==id||owner(next)!=next)continue;
+  if(owner(next)!=next)continue;
   int ax=(next&7)*512,ay=((next&63)>>3)*512,size=(int)area_size(next);
-  if(atlas||(ax<x+w/2+512&&ax+size>x-w/2-512&&ay<y+h/2+512&&ay+size>y-h/2-512))tick_area(next);
+  if(atlas||(ax<x+w/2+512&&ax+size>x-w/2-512&&ay<y+h/2+512&&ay+size>y-h/2-512))tick_area(next,next!=id);
  }
  simulation_ms=(SDL_GetPerformanceCounter()-before)*1000.0/SDL_GetPerformanceFrequency();
  service_commands();
 }
-void ZeldaWorldEvent(const SDL_Event *event) {
- if(!enabled)return;
- if(event->type==SDL_MOUSEWHEEL)zoom=clamp(zoom+(event->wheel.y<0?1:-1),1,8);
- if(event->type==SDL_KEYDOWN&&SNESRECOMP_SDL_EVENT_KEY(*event)==SDLK_F4)atlas=!atlas;
+bool ZeldaWorldEvent(const SDL_Event *event) {
+ if(!enabled)return false;
+ if(event->type==SDL_MOUSEWHEEL&&event->wheel.y!=0&&!(SDL_GetModState()&KMOD_CTRL)) {
+  zoom=clamp(zoom+(event->wheel.y<0?1:-1),1,8);return true;
+ }
+ if((event->type==SDL_KEYDOWN||event->type==SDL_KEYUP)&&SNESRECOMP_SDL_EVENT_KEY(*event)==SDLK_F4&&
+   !(SNESRECOMP_SDL_EVENT_MOD(*event)&(KMOD_CTRL|KMOD_SHIFT|KMOD_ALT|KMOD_GUI))) {
+  if(event->type==SDL_KEYDOWN&&!event->key.repeat)atlas=!atlas;
+  return true; /* F4 must not also load the stock fourth savestate slot. */
+ }
+ return false;
 }
 static void draw_piece(const WorldArea*r,const WorldPiece*p,int w,int h) {
  unsigned base=(r->obsel&7)<<13;
@@ -443,13 +573,15 @@ const uint32_t *ZeldaWorldPresent(const uint32_t *native,int native_pitch,
  }
  unsigned active_id=owner(rd16(0x8a));
  for(unsigned id=(unsigned)active_world;id<(unsigned)active_world+64;id++) {
-  WorldArea*r=areas[id];if(!r||!r->valid||id==active_id)continue;
-  for(unsigned i=r->piece_count;i--;)draw_piece(r,&r->pieces[i],w,h);
+  WorldArea*r=areas[id];if(!r||!r->valid)continue;
+  if(id!=active_id||live_pieces_valid)for(unsigned i=r->piece_count;i--;)draw_piece(r,&r->pieces[i],w,h);
+  for(WorldActorPool*p=r->pools;p;p=p->next)for(unsigned i=p->piece_count;i--;)draw_piece(r,&p->pieces[i],w,h);
  }
  /* Native OAM supplies Link, followers, local actors and items; world-space
   * projection removes the native scene rectangle and its 9-bit view limit. */
  WorldArea*r=areas[active_id];
- if(r)for(int i=127;i>=0;i--) {
+ if(r&&live_pieces_valid)for(unsigned i=live_piece_count;i--;)draw_piece(r,&live_pieces[i],w,h);
+ else if(r)for(int i=127;i>=0;i--) {
   unsigned off=0x800+(unsigned)i*4,xy=g_ram[off]|g_ram[off+1]<<8,cf=g_ram[off+2]|g_ram[off+3]<<8;
   unsigned ext=g_ram[0xa20+i]&3;
   unsigned y=xy>>8;if(y>=224)continue;
@@ -483,6 +615,22 @@ static bool floor_at(int wx,int wy,int world) {
  unsigned tile=(map8[0]|map8[1]<<8)&511;
  return RomPtr(0x0e9459)[tile]==0;
 }
+void ZeldaWorldAttachWindow(SDL_Window*window) {world_window=window;}
+static void ui_key(SDL_Keycode key) {
+ SDL_Event e={0};e.type=SDL_KEYDOWN;
+#if defined(SNESRECOMP_SDL3)
+ e.key.key=key;
+#else
+ e.key.keysym.sym=key;
+#endif
+ SDL_PushEvent(&e);e.type=SDL_KEYUP;SDL_PushEvent(&e);
+}
+bool ZeldaWorldPollUI(void) {
+ if(ui_resume_deadline&&SDL_GetPerformanceCounter()>=ui_resume_deadline) {
+  ui_resume_deadline=0;fprintf(stderr,"[world-ui] scheduled host resume\n");return true;
+ }
+ return false;
+}
 static bool prepare_edge(unsigned id,const char*dir,unsigned*next,int*px,int*py) {
  id=owner(id);if(!ensure(id))return false;
  int ax=(id&7)*512,ay=((id&63)>>3)*512,size=(int)area_size(id),dx=0,dy=0;
@@ -513,20 +661,38 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
  char line[4096];
  if(!strcmp(cmd,"world")) {
   unsigned actors=0;uint64_t ticks=0;
-  for(unsigned i=0;i<ZW_AREAS;i++)if(areas[i]&&areas[i]->valid){ticks+=areas[i]->ticks;for(unsigned k=0;k<16;k++)actors+=areas[i]->ram[0xdd0+k]!=0;}
+  for(unsigned i=0;i<ZW_AREAS;i++)if(areas[i]&&areas[i]->valid){
+   ticks+=areas[i]->ticks;for(unsigned k=0;k<16;k++)actors+=areas[i]->ram[0xdd0+k]!=0;
+   for(WorldActorPool*p=areas[i]->pools;p;p=p->next){ticks+=p->ticks;for(unsigned k=0;k<16;k++)actors+=p->ram[0xdd0+k]!=0;}
+  }
   snprintf(line,sizeof line,"{\"enabled\":%s,\"atlas\":%s,\"zoom\":%d,\"decoded\":%llu,\"failures\":%llu,\"decode_ms\":%.3f,\"simulation_ms\":%.3f,\"render_ms\":%.3f,\"actors\":%u,\"neighbor_ticks\":%llu,\"actor_hooks\":%llu,\"width\":%d,\"height\":%d,\"camera\":[%d,%d],\"module\":%u,\"sub\":%u,\"room\":%u,\"area\":%u,\"x\":%u,\"y\":%u}",enabled?"true":"false",atlas?"true":"false",zoom,(unsigned long long)decoded,(unsigned long long)failures,decode_ms,simulation_ms,render_ms,actors,(unsigned long long)ticks,(unsigned long long)actor_hooks,picture_width,picture_height,camera_x,camera_y,g_ram[0x10],g_ram[0x11],rd16(0xa0),rd16(0x8a),rd16(0x22),rd16(0x20));
   size_t end=strlen(line);snprintf(line+end-1,sizeof line-end+1,",\"handoffs\":%llu}",(unsigned long long)handoffs);
+ }else if(!strcmp(cmd,"world_ui")) {
+  /* Process-local SDL events exercise the actual input/presentation loop.
+   * This never synthesizes desktop input or changes another window. */
+  int w,h;
+  if(!strcmp(args,"f4"))ui_key(SDLK_F4);
+  else if(!strcmp(args,"wheel-up")||!strcmp(args,"wheel-down")) {
+   SDL_Event e={0};e.type=SDL_MOUSEWHEEL;e.wheel.y=!strcmp(args,"wheel-up")?1:-1;SDL_PushEvent(&e);
+  }else if(sscanf(args,"pause-resize %d %d",&w,&h)==2&&world_window&&w>=240&&h>=240&&w<=4096&&h<=4096) {
+   ui_resume_deadline=SDL_GetPerformanceCounter()+SDL_GetPerformanceFrequency()*5;
+   SDL_SetWindowSize(world_window,w,h);ui_key(SDLK_p);
+  }else {send("{\"error\":\"use f4, wheel-up, wheel-down or pause-resize W H (resumes after 5s)\"}");return 1;}
+  snprintf(line,sizeof line,"{\"ok\":true,\"process_local_ui_event\":true}");
  }else if(!strcmp(cmd,"world_edge")) {
   unsigned id=0,next=0;int x=0,y=0;char dir[16];
   bool ok=sscanf(args,"%u %15s",&id,dir)==2&&id<128&&playable()&&prepare_edge(id,dir,&next,&x,&y);
   snprintf(line,sizeof line,"{\"ok\":%s,\"from\":%u,\"to\":%u,\"x\":%d,\"y\":%d,\"assisted_position_only\":true}",ok?"true":"false",id,next,x,y);
  }else if(!strcmp(cmd,"world_area")) {
-  unsigned id=0;if(sscanf(args,"%u",&id)!=1||id>=128||!areas[owner(id)]){send("{\"error\":\"area not initialized\"}");return 1;}
+  unsigned id=0,page=0;if(sscanf(args,"%u %u",&id,&page)<1||id>=128||!areas[owner(id)]){send("{\"error\":\"area not initialized\"}");return 1;}
   WorldArea*r=areas[owner(id)];unsigned authored=0,loaded=0;
   for(unsigned i=0;i<4096;i++)if(r->ram[0x1df80+i]){authored++;loaded+=(r->ram[0x1ef80+(i>>3)]&(0x80>>(i&7)))!=0;}
-  int n=snprintf(line,sizeof line,"{\"id\":%u,\"ticks\":%llu,\"authored_spawns\":%u,\"loaded_spawns\":%u,\"actors\":[",owner(id),(unsigned long long)r->ticks,authored,loaded);bool first=true;
-  for(unsigned k=0;k<16;k++)if(r->ram[0xdd0+k]) {
-   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u}",first?"":",",k,r->ram[0xe20+k],r->ram[0xdd0+k],r->ram[0xd10+k]|r->ram[0xd30+k]<<8,r->ram[0xd00+k]|r->ram[0xd20+k]<<8,r->ram[0xdf0+k],r->ram[0xe50+k],r->ram[0xef0+k],r->ram[0xce2+k],r->ram[0xdb0+k],r->ram[0xde0+k]);first=false;
+  WorldActorPool*pool=r->pools;for(unsigned k=1;k<page&&pool;k++)pool=pool->next;
+  if(page&&!pool){send("{\"error\":\"actor pool not initialized\"}");return 1;}
+  uint8_t*ar=page?pool->ram:r->ram;uint64_t ticks=page?pool->ticks:r->ticks;
+  int n=snprintf(line,sizeof line,"{\"id\":%u,\"pool\":%u,\"pools\":%u,\"ticks\":%llu,\"authored_spawns\":%u,\"loaded_spawns\":%u,\"actors\":[",owner(id),page,1+pool_count(r),(unsigned long long)ticks,authored,loaded);bool first=true;
+  for(unsigned k=0;k<16;k++)if(ar[0xdd0+k]) {
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u}",first?"":",",k,ar[0xe20+k],ar[0xdd0+k],ar[0xd10+k]|ar[0xd30+k]<<8,ar[0xd00+k]|ar[0xd20+k]<<8,ar[0xdf0+k],ar[0xe50+k],ar[0xef0+k],ar[0xce2+k],ar[0xdb0+k],ar[0xde0+k]);first=false;
   }
   snprintf(line+n,sizeof line-(size_t)n,"]}");
  }else if(!strcmp(cmd,"world_qa_equipment")) {
@@ -535,6 +701,14 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   g_ram[0x5d]=g_ram[0x31f]=g_ram[0x4d]=g_ram[0x46]=g_ram[0x373]=0;
   g_ram[0x37b]=!strcmp(args,"protected");
   snprintf(line,sizeof line,"{\"ok\":true,\"assisted_equipment\":true,\"protect_player\":%s}",g_ram[0x37b]?"true":"false");
+ }else if(!strcmp(cmd,"world_qa_loose_pickup")) {
+  unsigned id,k;
+  if(sscanf(args,"%u %u",&id,&k)!=2||id>=128||k>=16||!areas[owner(id)]||
+    areas[owner(id)]->ram[0xe20+k]<0xd8||areas[owner(id)]->ram[0xe20+k]>=0xe5) {
+   send("{\"error\":\"use an existing ordinary native pickup\"}");return 1;
+  }
+  areas[owner(id)]->ram[0xe90+k]=0;
+  snprintf(line,sizeof line,"{\"ok\":true,\"bypassed_hidden_pickup_prerequisite\":true}");
  }else if(!strcmp(cmd,"world_qa_item")) {
   unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"hookshot")?10:0;
   if(!item){send("{\"error\":\"use bombs, boomerang, bow or hookshot\"}");return 1;}
@@ -571,10 +745,15 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
    * variables from background write_ram commands. Eastern Palace room C9. */
   unsigned room=0xc9;if(args&&*args)sscanf(args,"%u",&room);
   if(room>=0x100){send("{\"error\":\"use an audited native exit room below 256\"}");return 1;}
+  const uint8_t*exit_rooms=RomPtr(0x02dd8a),*exit_screens=RomPtr(0x02de28);int exit=-1;
+  for(int k=78;k>=0;k--)if((exit_rooms[k*2]|exit_rooms[k*2+1]<<8)==room){exit=k;break;}
+  if(exit<0){send("{\"error\":\"room has no native exit-table entry\"}");return 1;}
   wr16(0xa0,room);g_ram[0xf3c5]=3;g_ram[0xf36c]=g_ram[0xf36d]=0xa0;
+  g_ram[0xf3ca]=exit_screens[exit]&64;
+  if(g_ram[0xf3ca])g_ram[0xf357]=1;
   g_ram[0x2e4]=g_ram[0xfc1]=g_ram[0x5d]=0;
   g_ram[0x10]=8;g_ram[0x11]=g_ram[0xb0]=0;
-  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_exit_loader\":%u}",room);
+  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_exit_loader\":%u,\"assisted_world_setup\":true,\"native_area\":%u}",room,exit_screens[exit]);
  }else if(!strcmp(cmd,"world_decode")) {
   size_t cap=RtlRollbackSnapshotBound();uint8_t*a=malloc(cap),*b=malloc(cap);
   size_t n=a?RtlNetplaySnapshotToMemory(a,cap):0;
@@ -612,7 +791,7 @@ static void service_commands(void) {
  SDL_UnlockMutex(command_mutex);
 }
 static int queued_command(const char *cmd,const char *args,DebugServerGameSendLine send) {
- if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status")&&strcmp(cmd,"world_player")&&strcmp(cmd,"world_place_actor")&&strcmp(cmd,"world_qa_equipment")&&strcmp(cmd,"world_qa_item"))return 0;
+ if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status")&&strcmp(cmd,"world_player")&&strcmp(cmd,"world_place_actor")&&strcmp(cmd,"world_qa_equipment")&&strcmp(cmd,"world_qa_item")&&strcmp(cmd,"world_qa_loose_pickup")&&strcmp(cmd,"world_ui"))return 0;
  if(!command_mutex){send("{\"error\":\"world command queue unavailable\"}");return 1;}
  SDL_LockMutex(command_mutex);
  if(command_pending){SDL_UnlockMutex(command_mutex);send("{\"error\":\"world command busy\"}");return 1;}
@@ -639,11 +818,14 @@ typedef struct WorldStateHeader {
  uint32_t magic,schema,count,record_bytes;
  int32_t world,last,zoom,atlas,camera_x,camera_y,oam_x,oam_y;
  uint64_t handoffs;
+ uint32_t global_count,global_valid;
+ WorldPiece global_pieces[1024];
 } WorldStateHeader;
 typedef struct WorldRecordHeader {
  uint32_t id,pieces,obsel,reserved;
  uint64_t ticks;
 } WorldRecordHeader;
+typedef struct WorldPoolHeader {uint64_t ticks;uint32_t pieces,reserved;} WorldPoolHeader;
 enum { WORLD_STATE_MAGIC=0x3157335a };
 static WorldArea *pending_areas[ZW_AREAS];
 static WorldStateHeader pending_header;
@@ -662,30 +844,41 @@ static size_t record_bytes(void) {
  return sizeof(WorldRecordHeader)+sizeof(((WorldArea*)0)->ram)+sizeof(((WorldArea*)0)->vram)+
   sizeof(((WorldArea*)0)->palette)+sizeof(((WorldArea*)0)->tiles)+sizeof(((WorldArea*)0)->pieces);
 }
+static size_t pool_bytes(void) {
+ return sizeof(WorldPoolHeader)+sizeof(((WorldActorPool*)0)->ram)+sizeof(((WorldActorPool*)0)->pieces);
+}
 static size_t world_state_bound(void) {
- return enabled?sizeof(WorldStateHeader)+ZW_AREAS*record_bytes()+65536:0;
+ return enabled?sizeof(WorldStateHeader)+ZW_AREAS*(record_bytes()+ZW_EXTRA_POOLS*pool_bytes())+65536:0;
 }
 static void clear_pending(void) {
  for(unsigned i=0;i<ZW_AREAS;i++)if(pending_areas[i]) {
-  free(pending_areas[i]->raster);free(pending_areas[i]);pending_areas[i]=NULL;
+  free_pools(pending_areas[i]);free(pending_areas[i]->raster);free(pending_areas[i]);pending_areas[i]=NULL;
  }
  pending_load_ok=false;
 }
-const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v1":NULL;}
+const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v2":NULL;}
 static void area_stream(SaveLoadInfo*sli,WorldArea*r) {
  sli->func(sli,r->ram,sizeof r->ram);sli->func(sli,r->vram,sizeof r->vram);
  sli->func(sli,r->palette,sizeof r->palette);sli->func(sli,r->tiles,sizeof r->tiles);
  sli->func(sli,r->pieces,sizeof r->pieces);
 }
+static void pool_stream(SaveLoadInfo*sli,WorldActorPool*p) {
+ sli->func(sli,p->ram,sizeof p->ram);sli->func(sli,p->pieces,sizeof p->pieces);
+}
 void ZeldaWorldStateSave(SaveLoadInfo*sli) {
  if(!enabled)return;
- WorldStateHeader h={WORLD_STATE_MAGIC,1,0,(uint32_t)record_bytes(),
+ WorldStateHeader h={WORLD_STATE_MAGIC,2,0,(uint32_t)record_bytes(),
   active_world,last_area,zoom,atlas,camera_x,camera_y,native_oam_x,native_oam_y,handoffs};
+ h.global_count=live_piece_count;h.global_valid=live_pieces_valid;
+ memcpy(h.global_pieces,live_pieces,live_piece_count*sizeof(*live_pieces));
  for(unsigned i=0;i<ZW_AREAS;i++)h.count+=areas[i]&&areas[i]->valid;
  sli->func(sli,&h,sizeof h);
  for(unsigned i=0;i<ZW_AREAS;i++)if(areas[i]&&areas[i]->valid) {
-  WorldArea*r=areas[i];WorldRecordHeader a={i,r->piece_count,r->obsel,0,r->ticks};
+  WorldArea*r=areas[i];WorldRecordHeader a={i,r->piece_count,r->obsel,(pool_count(r)<<1)|r->populated,r->ticks};
   sli->func(sli,&a,sizeof a);area_stream(sli,r);
+  for(WorldActorPool*p=r->pools;p;p=p->next) {
+   WorldPoolHeader ph={p->ticks,p->piece_count,0};sli->func(sli,&ph,sizeof ph);pool_stream(sli,p);
+  }
  }
  RtlSaveExecutionState(sli);
 }
@@ -696,15 +889,20 @@ bool ZeldaWorldStatePreflight(const void*data,size_t size) {
  if(!core||core>size||size-core<sizeof(WorldStateHeader))return false;
  const uint8_t*p=(const uint8_t*)data+core;
  WorldStateHeader h;memcpy(&h,p,sizeof h);p+=sizeof h;
- if(h.magic!=WORLD_STATE_MAGIC||h.schema!=1||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
+ if(h.magic!=WORLD_STATE_MAGIC||h.schema!=2||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
     (h.world!=-1&&h.world!=0&&h.world!=64)||h.zoom<1||h.zoom>8||(h.atlas!=0&&h.atlas!=1)||
-    h.last < -1||h.last>=ZW_AREAS)return false;
+    h.last < -1||h.last>=ZW_AREAS||h.global_count>1024||h.global_valid>1)return false;
+ for(unsigned j=0;j<h.global_count;j++) {
+  unsigned n=h.global_pieces[j].size;if(n!=8&&n!=16&&n!=32&&n!=64)return false;
+ }
  StateCount exec=execution_layout();
  size_t expected=sizeof h+(size_t)h.count*record_bytes()+exec.bytes;
- if(size-core!=expected)return false;
+ if(size-core<expected)return false;
+ const uint8_t*end=(const uint8_t*)data+size-exec.bytes;
  for(unsigned i=0;i<h.count;i++) {
+  if((size_t)(end-p)<record_bytes())goto bad;
   WorldRecordHeader a;memcpy(&a,p,sizeof a);p+=sizeof a;
-  if(a.id>=ZW_AREAS||owner(a.id)!=a.id||pending_areas[a.id]||a.pieces>1024||a.obsel>255||a.reserved)goto bad;
+  if(a.id>=ZW_AREAS||owner(a.id)!=a.id||pending_areas[a.id]||a.pieces>1024||a.obsel>255||(a.reserved>>1)>ZW_EXTRA_POOLS)goto bad;
   WorldArea*r=calloc(1,sizeof(*r));if(!r)goto bad;
   pending_areas[a.id]=r;r->size=area_size(a.id);r->ticks=a.ticks;r->piece_count=a.pieces;r->obsel=(uint8_t)a.obsel;
   memcpy(r->ram,p,sizeof r->ram);p+=sizeof r->ram;
@@ -715,9 +913,22 @@ bool ZeldaWorldStatePreflight(const void*data,size_t size) {
   for(unsigned j=0;j<a.pieces;j++) {
    unsigned n=r->pieces[j].size;if(n!=8&&n!=16&&n!=32&&n!=64)goto bad;
   }
-  r->valid=r->dirty=true;
+  r->valid=r->dirty=true;r->populated=(a.reserved&1)!=0;
+  WorldActorPool**tail=&r->pools;
+  for(unsigned k=0;k<(a.reserved>>1);k++) {
+   if((size_t)(end-p)<pool_bytes())goto bad;
+   WorldPoolHeader ph;memcpy(&ph,p,sizeof ph);p+=sizeof ph;
+   if(ph.pieces>1024||ph.reserved)goto bad;
+   WorldActorPool*pool=calloc(1,sizeof(*pool));if(!pool)goto bad;
+   *tail=pool;tail=&pool->next;pool->ticks=ph.ticks;pool->piece_count=ph.pieces;
+   memcpy(pool->ram,p,sizeof pool->ram);p+=sizeof pool->ram;
+   memcpy(pool->pieces,p,sizeof pool->pieces);p+=sizeof pool->pieces;
+   for(unsigned j=0;j<ph.pieces;j++) {
+    unsigned n=pool->pieces[j].size;if(n!=8&&n!=16&&n!=32&&n!=64)goto bad;
+   }
+  }
  }
- if((h.last>=0&&(!pending_areas[h.last]||(h.last&64)!=h.world))||
+ if(p!=end||(h.last>=0&&(!pending_areas[h.last]||(h.last&64)!=h.world))||
     memcmp(p,exec.first,sizeof exec.first))goto bad;
  pending_header=h;pending_load_ok=true;return true;
 bad:
@@ -730,6 +941,9 @@ void ZeldaWorldStateLoad(SaveLoadInfo*sli,uint32_t version) {
  for(unsigned i=0;i<h.count;i++) {
   WorldRecordHeader a;sli->func(sli,&a,sizeof a);
   WorldArea*r=pending_areas[a.id];area_stream(sli,r);
+  for(WorldActorPool*p=r->pools;p;p=p->next) {
+   WorldPoolHeader ph;sli->func(sli,&ph,sizeof ph);pool_stream(sli,p);
+  }
  }
  pending_load_ok=RtlLoadExecutionState(sli);
 }
@@ -744,6 +958,8 @@ void ZeldaWorldStateLoaded(uint32_t version) {
   camera_x=pending_header.camera_x;camera_y=pending_header.camera_y;
   native_oam_x=pending_header.oam_x;native_oam_y=pending_header.oam_y;
   handoffs=pending_header.handoffs;decoded=pending_header.count;
+  live_piece_count=pending_header.global_count;live_pieces_valid=pending_header.global_valid!=0;
+  memcpy(live_pieces,pending_header.global_pieces,live_piece_count*sizeof(*live_pieces));
   held_transition_velocity=false;collision_window=false;
   RtlApplyExecutionState();ppu_rasterReset();
  }
@@ -759,7 +975,8 @@ static ReplayDigest replay_digest(const uint8_t*p,size_t n) {
  if(prefix+core<=n)d.core=digest_bytes(p+prefix,core);
  if(enabled&&prefix+core+sizeof(WorldStateHeader)<=n) {
   WorldStateHeader h;memcpy(&h,p+prefix+core,sizeof h);
-  size_t bytes=sizeof h+(size_t)h.count*record_bytes();
+  StateCount exec=execution_layout();
+  size_t bytes=n-prefix-core>=exec.bytes?n-prefix-core-exec.bytes:0;
   if(bytes<=n-prefix-core)d.world=digest_bytes(p+prefix+core,bytes);
  }
  return d;

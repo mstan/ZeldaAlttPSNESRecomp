@@ -6,7 +6,7 @@ author = "mstan"
 description = "Experimental persistent world camera for A Link to the Past. See the milestone burndown for current coverage."
 license = "MIT"
 resolver = "declarative"
-save_compatibility = "alttp-world-v1"
+save_compatibility = "alttp-world-v2"
 
 [[target]]
 game_id = "zelda-alttp-us"

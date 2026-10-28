@@ -395,7 +395,13 @@ static void DrawPpuFrameWithPerf(void) {
     /* Advance native raster/IRQ work once, then compose the independent world
      * surface. Its dimensions never change the console framebuffer or pitch. */
     static uint8_t native[kPpuBufWidth * 4 * 240];
-    RtlDrawPpuFrame(native, (size_t)g_snes_width*4, g_ppu_render_flags);
+    static bool native_valid;
+    /* Paused resize/zoom composes from the frozen native image. Rendering
+     * another console field can run raster IRQ work and is not a pause. */
+    if (!g_paused || !native_valid) {
+      RtlDrawPpuFrame(native, (size_t)g_snes_width*4, g_ppu_render_flags);
+      native_valid = true;
+    }
     int dw=0,dh=0,w=g_snes_width,h=g_snes_height,pitch=0;
     g_renderer_funcs.GetOutputSize(&dw,&dh);
     const uint32_t *world=ZeldaWorldPresent((uint32_t*)native,g_snes_width,dw,dh,&w,&h);
@@ -1348,6 +1354,7 @@ error_reading:;
     return 1;
   }
   g_window = window;
+  ZeldaWorldAttachWindow(window);
   SDL_SetWindowHitTest(window, HitTestCallback, NULL);
   host_report_breadcrumb("window created: %dx%d flags=0x%x",
                          window_width, window_height, g_win_flags);
@@ -1516,8 +1523,9 @@ error_reading:;
      * whole crash-capture pipeline (minidump + report + crash copy). */
     host_report_crash_test_tick();
 
+    if (ZeldaWorldPollUI()) HandleCommand(kKeys_Pause, true);
     while (SDL_PollEvent(&event)) {
-      ZeldaWorldEvent(&event);
+      if (ZeldaWorldEvent(&event)) continue;
       switch (event.type) {
       case SDL_CONTROLLERDEVICEADDED:
         OpenOneGamepad(SNESRECOMP_SDL_EVENT_DEVICE(event));
@@ -1581,6 +1589,7 @@ error_reading:;
     }
 
     if (g_paused) {
+      if (ZeldaWorldEnabled()) DrawPpuFrameWithPerf();
       SDL_Delay(16);
       continue;
     }
