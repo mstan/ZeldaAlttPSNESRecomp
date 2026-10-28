@@ -21,6 +21,7 @@ void ZeldaWorldActorBegin(void);
 void ZeldaWorldSpritesEnd(void);
 void ZeldaWorldRewardBegin(void);
 void ZeldaWorldBombDamageBegin(void);
+void ZeldaWorldProjectileCollisionBegin(void);
 void ZeldaWorldAncillaBegin(void);
 void ZeldaWorldAncillasEnd(void);
 void ZeldaWorldTransitionBegin(void);

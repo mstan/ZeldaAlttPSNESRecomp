@@ -15,7 +15,7 @@ class WorldOverridesTest(unittest.TestCase):
             source = '\n'.join(
                 f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n  '+
                 ('RecompStackPop();\n  ' if name in ('Sprite_Main','Ancilla_Main') else '')+'return 0;\n}'
-                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Unrelated')
+                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Unrelated')
                 for m in (0, 1) for x in (0, 1)
             )
             target = root / 'bank06_test_v2.c'
@@ -28,9 +28,9 @@ class WorldOverridesTest(unittest.TestCase):
             self.assertNotEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)
             first = target.read_bytes()
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 24)
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 28)
             self.assertEqual(first.count(b'/* ZELDA-WORLD-SPRITES-END */'), 8)
-            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd'):
+            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin'):
                 self.assertEqual(first.count((hook + '();').encode()), 4)
             self.assertEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)

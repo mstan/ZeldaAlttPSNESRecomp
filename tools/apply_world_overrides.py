@@ -6,9 +6,9 @@ instructions or return-frame contracts are replaced by this instrumentation.
 """
 import argparse,re
 from pathlib import Path
-PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main)_M[01]X[01]\(CpuState \*cpu\) \{')
+PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main|Ancilla_CheckSpriteCollision)_M[01]X[01]\(CpuState \*cpu\) \{')
 MARK='/* ZELDA-WORLD-ACTOR-PROJECTION */'
-CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin','Bomb_CheckSpriteDamage':'ZeldaWorldBombDamageBegin','Ancilla_ExecuteOne':'ZeldaWorldAncillaBegin'}
+CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin','Bomb_CheckSpriteDamage':'ZeldaWorldBombDamageBegin','Ancilla_ExecuteOne':'ZeldaWorldAncillaBegin','Ancilla_CheckSpriteCollision':'ZeldaWorldProjectileCollisionBegin'}
 ENDS={'Sprite_Main':'ZeldaWorldSpritesEnd','Ancilla_Main':'ZeldaWorldAncillasEnd'}
 END_MARK='/* ZELDA-WORLD-SPRITES-END */'
 POP=re.compile(r'\bRecompStackPop(?:Yield)?\(\);')

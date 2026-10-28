@@ -35,7 +35,7 @@ promise. No netplay qualification is implied.
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and centered HUD. 512x288 follow, 4096x4128 atlas and paused 300x500 portrait captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb explosion damage and ordinary pickup reward publication demonstrated across an edge. Global ancillas survive a handoff and project outside the old viewport. Full projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and inter-pool interactions remain open. |
+| 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
 | 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
 | 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18→19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
@@ -116,6 +116,20 @@ sets and the original OAM allocator are restored after weapon projection.
 This is presentation/lifetime evidence, not a passed cross-area arrow damage
 gate. State schema/feature identity is now `alttp-world-v3` and includes the
 projected weapon pieces. A hardware reset cancels a developer replay.
+
+`profiles/native-arrow-seam-v4/result.json` records an ordinary bow arrow
+damaging the area 19 guard from health 6 to 2 while Link starts in area 18,
+then remaining attached as Link crosses into area 19 and back. A 12-frame
+replay with the remote attachment is byte-exact. `profiles/native-arrow-extra-pool/result.json`
+records the same health change and replay for the guard in area 27 pool 1.
+Only equipment/protection and the existing guard's position/facing were
+assisted. The original `$08:8D68` collision result resumes the original arrow
+at `$08:A16E`; movement, ammo and timers do not advance in the deferred pass.
+Pointer-free area/pool/slot/type/spawn handles temporarily expose the actual
+target to the native attached-arrow routine, then restore the live slot
+before any enemy executes. Schema/feature identity is now `alttp-world-v4`.
+This does not qualify every enemy, projectile, native reference or progression
+phase. Far-projectile terrain windows and native secret indexing are open.
 
 `profiles/viewport-input-qualification/commands.jsonl` records actual process
 SDL F4 and wheel events. F4 toggles the atlas without loading a deliberately
