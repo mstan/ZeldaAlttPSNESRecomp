@@ -42,7 +42,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
 | 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
 | 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
+| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
@@ -62,7 +62,7 @@ graphics/maps are checked in or distributed.
 
 Raw command journals, screenshots and source/binary receipts are in the task
 root above. `profiles/seams/*-frames.json` records four directed crossings:
-18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢19 east, 18ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢17 west, 21ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢29 south, 29ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢21 north. The setup places Link on a
+18ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢19 east, 18ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢17 west, 21ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢29 south, 29ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢21 north. The setup places Link on a
 native walkable corridor and explicitly leaves the seed's AsleepInBed handler;
 only controller movement performs the crossing. It is an assisted setup, not
 evidence of completing the prologue or walking through a dungeon exit.
@@ -315,10 +315,12 @@ Native Pyramid captures show a deliberately black backdrop, with BG1 on the
 subscreen supplying terrain through transparent BG2 pixels. Each area now runs
 the original overlay decoder/NMI upload and retains native scroll, palette,
 subscreen and color-math state. The compositor resolves that layer behind BG2
-and the eligible OBJ palettes. A native-versus-expanded Pyramid capture matches
-40,671/40,960 registered terrain pixels (99.29%; a few live actors advance),
-with zero new black pixels. Native scanout starts at line 1; comparison accounts
-for that registration. This does not qualify all weather, lighting or windows.
+and the eligible OBJ palettes. A native-versus-expanded Pyramid comparison matches
+35,636/35,804 registered background pixels (99.53%), excluding colors from
+the native OBJ palettes because expanded actor populations differ. The unmasked
+repeat matches 96.99%; that is not a full-scene equality gate. It has zero new
+black pixels. Native scanout starts at line 1; comparison accounts for that
+registration. This does not qualify all weather, lighting or windows.
 
 Frame-by-frame area 82->83 evidence reproduced missing Link body pieces at the
 native 256px view edges. Link's original drawing routine now uses its own
