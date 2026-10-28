@@ -14,7 +14,7 @@ class WorldOverridesTest(unittest.TestCase):
             root = Path(directory)
             source = '\n'.join(
                 f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n  return 0;\n}}'
-                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Unrelated')
+                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Unrelated')
                 for m in (0, 1) for x in (0, 1)
             )
             target = root / 'bank06_test_v2.c'
@@ -27,8 +27,8 @@ class WorldOverridesTest(unittest.TestCase):
             self.assertNotEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)
             first = target.read_bytes()
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 12)
-            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd'):
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 16)
+            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin'):
                 self.assertEqual(first.count((hook + '();').encode()), 4)
             self.assertEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)

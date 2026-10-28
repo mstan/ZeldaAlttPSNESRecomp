@@ -6,9 +6,9 @@ instructions or return-frame contracts are replaced by this instrumentation.
 """
 import argparse,re
 from pathlib import Path
-PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main)_M[01]X[01]\(CpuState \*cpu\) \{')
+PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer)_M[01]X[01]\(CpuState \*cpu\) \{')
 MARK='/* ZELDA-WORLD-ACTOR-PROJECTION */'
-CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd'}
+CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin'}
 def main():
  p=argparse.ArgumentParser();p.add_argument('--gen-dir',type=Path,default=Path('src/gen'));p.add_argument('--check',action='store_true');a=p.parse_args()
  count=changed=0

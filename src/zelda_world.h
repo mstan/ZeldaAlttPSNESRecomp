@@ -15,6 +15,7 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs);
 void ZeldaWorldEvent(const SDL_Event *event);
 void ZeldaWorldSetup(void);
 void ZeldaWorldActorBegin(void);
+void ZeldaWorldRewardBegin(void);
 void ZeldaWorldTransitionBegin(void);
 void ZeldaWorldTransitionEnd(void);
 struct SaveLoadInfo;

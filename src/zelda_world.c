@@ -53,6 +53,7 @@ static uint64_t handoffs;
 static int native_oam_x,native_oam_y;
 static unsigned last_call;
 static WorldArea *sim_area;
+static bool sim_reward;
 static int sim_scroll_x,sim_scroll_y;
 static uint64_t actor_hooks;
 static bool held_transition_velocity;
@@ -209,6 +210,14 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x0684e2)ZeldaWorldActorBegin();
  if(pc==0x02a9c4)ZeldaWorldTransitionBegin();
  if(pc==0x068328)ZeldaWorldTransitionEnd();
+ if(pc==0x06d13c)ZeldaWorldRewardBegin();
+}
+void ZeldaWorldRewardBegin(void) {
+ if(!sim_area||!RtlGuestScopeActive())return;
+ unsigned k=g_ram[0xfa0]&15,type=g_ram[0xe20+k];
+ /* Ordinary absorbables only. NPC item receipts, big keys and quest
+  * presentation require their own native routing, not an inventory write. */
+ if(type>=0xd8&&type<0xe5)sim_reward=true;
 }
 void ZeldaWorldTransitionBegin(void) {
  if(!playable()||RtlGuestScopeActive()||held_transition_velocity)return;
@@ -222,28 +231,41 @@ void ZeldaWorldTransitionEnd(void) {
  if(!held_transition_velocity||RtlGuestScopeActive())return;
  g_ram[0x30]=held_vy;g_ram[0x31]=held_vx;held_transition_velocity=false;
 }
-typedef struct Tick {unsigned id;int player_x,player_y;uint8_t player[0x60],progress[0x1000];uint8_t frame;} Tick;
+/* Only these native player effects cross a neighbor transaction. Native
+ * Sprite_Main owns enemy AI, sword hitboxes, damage/recoil and hit timers;
+ * its camera, OAM allocator and frame counters remain area-local. Player
+ * weapons are global and must not advance once for every neighboring area. */
+static const uint16_t combat_effects[]={0x27,0x28,0x46,0x4d,0x2e3,0x31f,0x360,0x373};
+typedef struct Tick {
+ unsigned id;int player_x,player_y;
+ uint8_t player[0x60],action[0xb0],progress[0x1000],effect[sizeof combat_effects/sizeof *combat_effects];
+ uint8_t frame,sfx[3],rewards[0x1a];bool reward;
+} Tick;
 static bool tick_scope(void *opaque) {
  Tick*t=opaque;WorldArea*r=areas[t->id];
  memcpy(g_ram,r->ram,sizeof r->ram);
  memcpy(g_ppu->vram,r->vram,sizeof r->vram);memcpy(g_ppu->cgram,r->palette,sizeof r->palette);
  memcpy(g_ram+0xf000,t->progress,sizeof t->progress);memcpy(g_ram+0x20,t->player,sizeof t->player);
+ memcpy(g_ram+0x2d0,t->action,sizeof t->action);
  g_ram[0x10]=9;g_ram[0x11]=g_ram[0xfc1]=0;g_ram[0x1a]=t->frame;
  g_ram[0x15]=g_ram[0x16]=g_ram[0x17]=g_ram[0x18]=0;
  memset(g_ram+0xf0,0,10);
- /* Neighbor-only ticks cannot charge the player's inventory, HP, audio or
-  * SRAM. The world interaction milestone explicitly owns cross-area effects. */
- g_ram[0x37b]=1;
+ /* Ancillas belong to the live player, including across an area handoff.
+  * Do not run stale copies inherited when this area's loader was called. */
+ memset(g_ram+0xc4a,0,10);
  g_ram[0xf3cc]=0;
  int ax=(t->id&7)*512,ay=((t->id&63)>>3)*512;
  wr16(0x708,ay);wr16(0x70c,ax>>3);wr16(0x70a,r->size-16);wr16(0x70e,(r->size-16)>>3);
- wr16(0x22,clamp(t->player_x,ax,ax+(int)r->size-1));
- wr16(0x20,clamp(t->player_y,ay,ay+(int)r->size-1));
+ wr16(0x22,t->player_x);wr16(0x20,t->player_y);
  r->piece_count=0;sim_scroll_x=ax;sim_scroll_y=ay;
  wr16(0xe2,ax);wr16(0xe8,ay);wr16(0xe0,ax);wr16(0xe6,ay);
  if(!call(0x00841e,0x30,0,0,0))return false;
  if(!call(0x068328,0x30,0,0,0))return false;
  collect_pieces(r,sim_scroll_x,sim_scroll_y);
+ for(unsigned i=0;i<sizeof combat_effects/sizeof *combat_effects;i++)t->effect[i]=g_ram[combat_effects[i]];
+ memcpy(t->sfx,g_ram+0x12d,3);
+ t->reward=sim_reward&&g_ram[0x10]==9&&g_ram[0x11]==0;
+ memcpy(t->rewards,g_ram+0xf360,sizeof t->rewards);
  if(memcmp(r->tiles,g_ram+0x2000,sizeof r->tiles)){memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);r->dirty=true;}
  memcpy(r->ram,g_ram,sizeof r->ram);r->ticks++;
  return true;
@@ -252,8 +274,20 @@ static void tick_area(unsigned id) {
  if(!ensure(id))return;
  Tick t={0};t.id=id;t.player_x=rd16(0x22);t.player_y=rd16(0x20);t.frame=g_ram[0x1a];
  memcpy(t.player,g_ram+0x20,sizeof t.player);memcpy(t.progress,g_ram+0xf000,sizeof t.progress);
- sim_area=areas[id];
+ memcpy(t.action,g_ram+0x2d0,sizeof t.action);
+ uint8_t before[sizeof t.effect],sfx_before[3];
+ for(unsigned i=0;i<sizeof combat_effects/sizeof *combat_effects;i++)before[i]=g_ram[combat_effects[i]];
+ memcpy(sfx_before,g_ram+0x12d,3);
+ /* The scoped machine starts with the live pending SFX, so only a native
+  * attack's changed queue entry is published after restoration. */
+ memcpy(areas[id]->ram+0x12d,sfx_before,3);
+ sim_area=areas[id];sim_reward=false;
  if(!RtlGuestScopeRun(tick_scope,&t,1000000))failures++;
+ else {
+  for(unsigned i=0;i<sizeof combat_effects/sizeof *combat_effects;i++)if(t.effect[i]!=before[i])g_ram[combat_effects[i]]=t.effect[i];
+  for(unsigned i=0;i<3;i++)if(t.sfx[i]!=sfx_before[i])g_ram[0x12d+i]=t.sfx[i];
+  if(t.reward)for(unsigned i=0;i<sizeof t.rewards;i++)if(t.rewards[i]!=t.progress[0x360+i])g_ram[0xf360+i]=t.rewards[i];
+ }
  sim_area=NULL;
 }
 bool ZeldaWorldEnabled(void){return enabled;}
@@ -302,7 +336,10 @@ static bool adopt_area(unsigned id,bool crossing) {
  WorldArea*r=areas[id];if(!r||!r->valid)return false;
  /* Only area-owned state crosses this handoff. Player action/stack, all
   * native progress/SRAM, input, audio, clocks and portal history stay live. */
- memcpy(g_ram+0xb00,r->ram+0xb00,0x500);
+ /* $0BF0..$0C99 is the player's global ancilla pool. Copying the whole
+  * sprite slab silently replaced a traveling arrow/bomb with stale data. */
+ memcpy(g_ram+0xb00,r->ram+0xb00,0xf0);
+ memcpy(g_ram+0xc9a,r->ram+0xc9a,0x366);
  memcpy(g_ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(g_ram+0x4000,r->ram+0x4000,0x8000);
  memcpy(g_ram+0x1d000,r->ram+0x1d000,0x3000);
@@ -485,11 +522,39 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   snprintf(line,sizeof line,"{\"ok\":%s,\"from\":%u,\"to\":%u,\"x\":%d,\"y\":%d,\"assisted_position_only\":true}",ok?"true":"false",id,next,x,y);
  }else if(!strcmp(cmd,"world_area")) {
   unsigned id=0;if(sscanf(args,"%u",&id)!=1||id>=128||!areas[owner(id)]){send("{\"error\":\"area not initialized\"}");return 1;}
-  WorldArea*r=areas[owner(id)];int n=snprintf(line,sizeof line,"{\"id\":%u,\"ticks\":%llu,\"actors\":[",owner(id),(unsigned long long)r->ticks);bool first=true;
+  WorldArea*r=areas[owner(id)];unsigned authored=0,loaded=0;
+  for(unsigned i=0;i<4096;i++)if(r->ram[0x1df80+i]){authored++;loaded+=(r->ram[0x1ef80+(i>>3)]&(0x80>>(i&7)))!=0;}
+  int n=snprintf(line,sizeof line,"{\"id\":%u,\"ticks\":%llu,\"authored_spawns\":%u,\"loaded_spawns\":%u,\"actors\":[",owner(id),(unsigned long long)r->ticks,authored,loaded);bool first=true;
   for(unsigned k=0;k<16;k++)if(r->ram[0xdd0+k]) {
-   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u}",first?"":",",k,r->ram[0xe20+k],r->ram[0xdd0+k],r->ram[0xd10+k]|r->ram[0xd30+k]<<8,r->ram[0xd00+k]|r->ram[0xd20+k]<<8,r->ram[0xdf0+k]);first=false;
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u}",first?"":",",k,r->ram[0xe20+k],r->ram[0xdd0+k],r->ram[0xd10+k]|r->ram[0xd30+k]<<8,r->ram[0xd00+k]|r->ram[0xd20+k]<<8,r->ram[0xdf0+k],r->ram[0xe50+k],r->ram[0xef0+k],r->ram[0xce2+k],r->ram[0xdb0+k],r->ram[0xde0+k]);first=false;
   }
   snprintf(line+n,sizeof line-(size_t)n,"]}");
+ }else if(!strcmp(cmd,"world_qa_equipment")) {
+  /* Disposable encounter setup only; no actor damage/death or reward flag. */
+  g_ram[0xf359]=1;g_ram[0xf35a]=1;g_ram[0xf36c]=g_ram[0xf36d]=0xa0;
+  g_ram[0x5d]=g_ram[0x31f]=g_ram[0x4d]=g_ram[0x46]=g_ram[0x373]=0;
+  g_ram[0x37b]=!strcmp(args,"protected");
+  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_equipment\":true,\"protect_player\":%s}",g_ram[0x37b]?"true":"false");
+ }else if(!strcmp(cmd,"world_qa_item")) {
+  unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"hookshot")?10:0;
+  if(!item){send("{\"error\":\"use bombs, boomerang, bow or hookshot\"}");return 1;}
+  g_ram[0x303]=g_ram[0x304]=(uint8_t)item;
+  g_ram[0xf340]=3;g_ram[0xf341]=g_ram[0xf342]=1;g_ram[0xf343]=10;g_ram[0xf377]=50;
+  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_inventory_selection\":%u}",item);
+ }else if(!strcmp(cmd,"world_place_actor")) {
+  unsigned id,k,x,y,dir=4;
+  if(sscanf(args,"%u %u %u %u %u",&id,&k,&x,&y,&dir)<4||id>=128||k>=16||x>=4096||y>=4096||!ensure(id)||!areas[owner(id)]->ram[0xdd0+k]) {
+   send("{\"error\":\"need an initialized native actor and valid world coordinates\"}");return 1;
+  }
+  uint8_t*p=areas[owner(id)]->ram;
+  p[0xd10+k]=(uint8_t)x;p[0xd30+k]=(uint8_t)(x>>8);p[0xd00+k]=(uint8_t)y;p[0xd20+k]=(uint8_t)(y>>8);
+  if(dir<4)p[0xde0+k]=p[0xeb0+k]=(uint8_t)dir;
+  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_position\":true,\"assisted_facing\":%s}",dir<4?"true":"false");
+ }else if(!strcmp(cmd,"world_player")) {
+  int n=snprintf(line,sizeof line,"{\"health\":%u,\"pending_damage\":%u,\"invulnerability\":%u,\"recoil_timer\":%u,\"aux_state\":%u,\"sword\":%u,\"sword_frame\":%u,\"bombs\":%u,\"bomb_filler\":%u,\"arrows\":%u,\"rupees\":%u,\"rupee_goal\":%u,\"ancillas\":[",g_ram[0xf36d],g_ram[0x373],g_ram[0x31f],g_ram[0x46],g_ram[0x4d],g_ram[0xf359],g_ram[0x3c],g_ram[0xf343],g_ram[0xf375],g_ram[0xf377],rd16(0xf362),rd16(0xf360));
+  bool first=true;for(unsigned k=0;k<10;k++)if(g_ram[0xc4a+k]) {
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"x\":%u,\"y\":%u,\"timer\":%u}",first?"":",",k,g_ram[0xc4a+k],g_ram[0xc04+k]|((unsigned)g_ram[0xc18+k]<<8),g_ram[0xbfa+k]|((unsigned)g_ram[0xc0e + k]<<8),g_ram[0xc68+k]);first=false;
+  }snprintf(line+n,sizeof line-(size_t)n,"]}");
  }else if(!strcmp(cmd,"world_view")) {
   atlas=!strcmp(args,"atlas");if(!strcmp(args,"off"))enabled=false;else enabled=true;
   snprintf(line,sizeof line,"{\"ok\":true}");
@@ -547,7 +612,7 @@ static void service_commands(void) {
  SDL_UnlockMutex(command_mutex);
 }
 static int queued_command(const char *cmd,const char *args,DebugServerGameSendLine send) {
- if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status"))return 0;
+ if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status")&&strcmp(cmd,"world_player")&&strcmp(cmd,"world_place_actor")&&strcmp(cmd,"world_qa_equipment")&&strcmp(cmd,"world_qa_item"))return 0;
  if(!command_mutex){send("{\"error\":\"world command queue unavailable\"}");return 1;}
  SDL_LockMutex(command_mutex);
  if(command_pending){SDL_UnlockMutex(command_mutex);send("{\"error\":\"world command busy\"}");return 1;}
