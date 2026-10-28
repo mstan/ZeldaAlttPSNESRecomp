@@ -4,6 +4,7 @@
  * Current milestone and limitations are recorded in docs/SEAMLESS-WORLD.md.
  */
 #include "zelda_world.h"
+#include "zelda_world_coordinates.h"
 #include "common_rtl.h"
 #include "common_cpu_infra.h"
 #include "cpu_state.h"
@@ -166,8 +167,22 @@ static void free_pools(WorldArea*r) {
 static unsigned pool_count(const WorldArea*r) {
  unsigned n=0;for(WorldActorPool*p=r->pools;p;p=p->next)n++;return n;
 }
-static bool populate_native(WorldArea*r,bool keep_live) {
- free_pools(r);
+typedef struct PoolReserve {WorldActorPool*free;} PoolReserve;
+/* Budget aborts unwind C without running callback cleanup. Reserve memory
+ * before entering a scope, and reclaim both unused and failed output pools
+ * after it returns, as required by the guest-scope ownership contract. */
+static void release_reserve(PoolReserve*r) {
+ while(r->free){WorldActorPool*p=r->free;r->free=p->next;free(p);}
+}
+static bool prepare_reserve(PoolReserve*r) {
+ r->free=NULL;
+ for(unsigned i=0;i<ZW_EXTRA_POOLS;i++) {
+  WorldActorPool*p=calloc(1,sizeof(*p));if(!p){release_reserve(r);return false;}
+  p->next=r->free;r->free=p;
+ }
+ return true;
+}
+static bool populate_native(WorldArea*r,bool keep_live,PoolReserve*reserve) {
  if(!keep_live) {
   /* Sprite_DisableAll intentionally preserves the unique live Mirror portal.
    * A decoded neighbor must not clone that portal into every native area. */
@@ -184,7 +199,8 @@ static bool populate_native(WorldArea*r,bool keep_live) {
    if(actors>=8||overlords>=6||attempt) {
     if(pools>=ZW_EXTRA_POOLS)return false;
     memcpy(pool?pool->ram:r->ram,g_ram,0x20000);
-    WorldActorPool*p=calloc(1,sizeof(*p));if(!p)return false;
+    WorldActorPool*p=reserve->free;if(!p)return false;
+    reserve->free=p->next;p->next=NULL;
     if(pool)pool->next=p;else r->pools=p;
     pool=p;pools++;
     /* Reset native per-pool bookkeeping without resetting the authored map
@@ -208,11 +224,11 @@ static bool populate_native(WorldArea*r,bool keep_live) {
  for(WorldActorPool*p=r->pools;p;p=p->next)memcpy(p->ram+0x1ef80,loaded,sizeof loaded);
  memcpy(g_ram,r->ram,0x20000);r->populated=true;return true;
 }
+typedef struct Decode {unsigned id;WorldArea *area;PoolReserve*reserve;} Decode;
 static bool populate_scope(void*opaque) {
- WorldArea*r=opaque;memcpy(g_ram,r->ram,sizeof r->ram);
- return populate_native(r,true);
+ Decode*d=opaque;memcpy(g_ram,d->area->ram,sizeof d->area->ram);
+ return populate_native(d->area,true,d->reserve);
 }
-typedef struct Decode {unsigned id;WorldArea *area;} Decode;
 static bool decode_scope(void *opaque) {
  Decode *d=opaque;unsigned id=d->id;WorldArea *r=d->area;
  wr16(0x8a,id);wr16(0x40a,id);g_ram[0x10]=9;g_ram[0x11]=g_ram[0x1b]=0;
@@ -230,7 +246,7 @@ static bool decode_scope(void *opaque) {
  memcpy(g_ppu->vram+0x3c00,g_ram+0xa680,0x400);
  wr16(0xe2,(id&7)*512+128);wr16(0xe8,((id&63)>>3)*512+128);
  if(!call(0x09c499,0x30,0,0,0))return false;
- if(!populate_native(r,false))return false;
+ if(!populate_native(r,false,d->reserve))return false;
  memcpy(r->ram,g_ram,sizeof r->ram);
  memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);
  memcpy(r->vram,g_ppu->vram,sizeof r->vram);
@@ -243,9 +259,13 @@ static bool ensure(unsigned id) {
  if(!areas[id])areas[id]=calloc(1,sizeof(WorldArea));
  WorldArea *r=areas[id];if(!r)return false;
  if(r->valid)return true;
- r->size=area_size(id);Decode d={id,r};
+ r->size=area_size(id);PoolReserve reserve;Decode d={id,r,&reserve};
  uint64_t before=SDL_GetPerformanceCounter();
- bool ok=RtlGuestScopeRun(decode_scope,&d,2000000);
+ free_pools(r);
+ bool ok=prepare_reserve(&reserve);
+ if(ok)ok=RtlGuestScopeRun(decode_scope,&d,2000000);
+ release_reserve(&reserve);
+ if(!ok){free_pools(r);r->populated=false;}
  decode_ms+=(SDL_GetPerformanceCounter()-before)*1000.0/SDL_GetPerformanceFrequency();
  if(ok){r->valid=r->dirty=true;decoded++;}else failures++;
  return ok;
@@ -425,6 +445,7 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs) {
  replay_boundary(inputs);
  collision_window=false;
  if(!playable()||active_world<0){live_pieces_valid=false;live_piece_count=0;return true;}
+ wr16(0x22,ZeldaWorldLinkCoordinate(rd16(0x22)));wr16(0x20,ZeldaWorldLinkCoordinate(rd16(0x20)));
  collision_x=clamp(((int)rd16(0x22)-256)/512*512,0,3072);
  collision_y=clamp(((int)rd16(0x20)-256)/512*512,0,3072);
  collision_world=active_world;
@@ -490,9 +511,9 @@ void ZeldaWorldFrameEnd(void) {
  if(continuous)commit_collision();
  native_oam_x=rd16(0xe2);native_oam_y=rd16(0xe8);
  if(continuous) {
-  int px=clamp(rd16(0x22),0,4080),py=clamp(rd16(0x20),0,4080);
+  int px=ZeldaWorldLinkCoordinate(rd16(0x22)),py=ZeldaWorldLinkCoordinate(rd16(0x20));
   wr16(0x22,px);wr16(0x20,py);
-  unsigned geographic=owner((unsigned)(((py+16)/512)*8+(px+8)/512+active_world));
+  unsigned geographic=owner(ZeldaWorldCell(px+8,py+16,(unsigned)active_world));
   if(geographic!=(unsigned)last_area) {
    if(areas[last_area])capture((unsigned)last_area);
    collision_window=false;
@@ -506,12 +527,16 @@ void ZeldaWorldFrameEnd(void) {
  if(areas[id]->populated)memset(g_ram+0x1ef80,0xff,512);
  capture(id);
  if(!areas[id]->populated) {
-  if(RtlGuestScopeRun(populate_scope,areas[id],2000000)) {
+  PoolReserve reserve;Decode d={id,areas[id],&reserve};free_pools(areas[id]);
+  bool ok=prepare_reserve(&reserve);
+  if(ok)ok=RtlGuestScopeRun(populate_scope,&d,2000000);
+  release_reserve(&reserve);
+  if(ok) {
    /* Publish the populated base pool while preserving global ancillas. */
    memcpy(g_ram+0xb00,areas[id]->ram+0xb00,0xf0);
    memcpy(g_ram+0xc9a,areas[id]->ram+0xc9a,0x366);
    memcpy(g_ram+0x1d000,areas[id]->ram+0x1d000,0x3000);
-  }else failures++;
+  }else {free_pools(areas[id]);areas[id]->populated=false;failures++;}
  }
  collision_window=false;last_area=(int)id;
  uint64_t before=SDL_GetPerformanceCounter();
@@ -695,6 +720,17 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
    n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u}",first?"":",",k,ar[0xe20+k],ar[0xdd0+k],ar[0xd10+k]|ar[0xd30+k]<<8,ar[0xd00+k]|ar[0xd20+k]<<8,ar[0xdf0+k],ar[0xe50+k],ar[0xef0+k],ar[0xce2+k],ar[0xdb0+k],ar[0xde0+k]);first=false;
   }
   snprintf(line+n,sizeof line-(size_t)n,"]}");
+ }else if(!strcmp(cmd,"world_qa_position")) {
+  int x,y;
+  if(sscanf(args,"%d %d",&x,&y)!=2||!playable()||x < -1||y < -1||x>4081||y>4081) {
+   send("{\"error\":\"use overworld coordinates -1..4081 for an assisted edge setup\"}");return 1;
+  }
+  unsigned id=owner(ZeldaWorldCell(x,y,(unsigned)active_world));
+  if(!ensure(id)){send("{\"error\":\"could not initialize target area\"}");return 1;}
+  wr16(0x22,(uint16_t)x);wr16(0x20,(uint16_t)y);g_ram[0x5d]=g_ram[0x30]=g_ram[0x31]=0;
+  if(!adopt_area(id,false)){send("{\"error\":\"could not adopt target area\"}");return 1;}
+  last_area=(int)id;collision_window=false;
+  snprintf(line,sizeof line,"{\"ok\":true,\"assisted_position_only\":true,\"area\":%u}",id);
  }else if(!strcmp(cmd,"world_qa_equipment")) {
   /* Disposable encounter setup only; no actor damage/death or reward flag. */
   g_ram[0xf359]=1;g_ram[0xf35a]=1;g_ram[0xf36c]=g_ram[0xf36d]=0xa0;
@@ -791,7 +827,7 @@ static void service_commands(void) {
  SDL_UnlockMutex(command_mutex);
 }
 static int queued_command(const char *cmd,const char *args,DebugServerGameSendLine send) {
- if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status")&&strcmp(cmd,"world_player")&&strcmp(cmd,"world_place_actor")&&strcmp(cmd,"world_qa_equipment")&&strcmp(cmd,"world_qa_item")&&strcmp(cmd,"world_qa_loose_pickup")&&strcmp(cmd,"world_ui"))return 0;
+ if(strcmp(cmd,"world")&&strcmp(cmd,"world_area")&&strcmp(cmd,"world_edge")&&strcmp(cmd,"world_view")&&strcmp(cmd,"world_decode")&&strcmp(cmd,"world_isolation")&&strcmp(cmd,"world_qa_overworld")&&strcmp(cmd,"world_replay")&&strcmp(cmd,"world_replay_status")&&strcmp(cmd,"world_player")&&strcmp(cmd,"world_place_actor")&&strcmp(cmd,"world_qa_equipment")&&strcmp(cmd,"world_qa_item")&&strcmp(cmd,"world_qa_loose_pickup")&&strcmp(cmd,"world_qa_position")&&strcmp(cmd,"world_ui"))return 0;
  if(!command_mutex){send("{\"error\":\"world command queue unavailable\"}");return 1;}
  SDL_LockMutex(command_mutex);
  if(command_pending){SDL_UnlockMutex(command_mutex);send("{\"error\":\"world command busy\"}");return 1;}

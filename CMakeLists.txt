@@ -159,3 +159,17 @@ endif()
 # Mods page would have been empty in every build and release zip.
 snesrecomp_target_mod_catalog(ZeldaALttPSNESRecomp
     "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
+
+# Small ROM-free correctness gates; opt into them with BUILD_TESTING.
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(alttp_world_coordinates_test tests/world_coordinates_test.c)
+    set_target_properties(alttp_world_coordinates_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_include_directories(alttp_world_coordinates_test PRIVATE src)
+    target_compile_features(alttp_world_coordinates_test PRIVATE c_std_11)
+    add_test(NAME alttp_world_coordinates COMMAND alttp_world_coordinates_test)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME alttp_world_generated_hooks
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_world_overrides.py")
+endif()

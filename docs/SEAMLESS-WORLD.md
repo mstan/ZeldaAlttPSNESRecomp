@@ -96,6 +96,14 @@ frame/RAM while paused, and resumed frame progress. The test helper schedules
 the existing host pause command on the main loop; physical controls remain an
 owner handoff check. Native raster/IRQ rendering is not repeated while paused.
 
+`profiles/world-boundaries/result.json` records eight assisted boundary cases
+in Light/Dark Worlds: bottom/right overflow and north/west underflow clamp
+without an ordinary handoff or accidental world change. The ROM-free
+coordinate test checks all 65,536 native coordinate words in both worlds.
+Configure with `-DBUILD_TESTING=ON` to run it and the generation-hook test via
+CTest. Extra pool memory is reserved outside guest scopes, with unused and
+failed output allocations reclaimed after the scope returns.
+
 Cross-area projectile collision/lifetime, enemy migration, authored secret
 indices, NPC receipts and other one-time progression remain incomplete gates.
 Native object references and enemy-to-enemy interactions across separate pools
