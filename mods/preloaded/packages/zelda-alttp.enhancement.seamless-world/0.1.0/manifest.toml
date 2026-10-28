@@ -6,7 +6,7 @@ author = "mstan"
 description = "Experimental persistent world camera for A Link to the Past. See the milestone burndown for current coverage."
 license = "MIT"
 resolver = "declarative"
-save_compatibility = "alttp-world-v7"
+save_compatibility = "alttp-world-v10"
 
 [[target]]
 game_id = "zelda-alttp-us"
@@ -16,7 +16,7 @@ rom_sha256 = "66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb"
 id = "seamless-world"
 name = "Seamless World"
 experimental = true
-description = "Development experiment: live overworld neighbors, continuous edges, mouse-wheel zoom and F4 whole-map view. Cross-area combat and dungeon floors are incomplete. Local play only."
+description = "Experimental: live Light/Dark worlds and dungeon-floor views. Mouse wheel zoom; F4 shows the whole current map. Some interactions and effects are unfinished. Local play only."
 group = "Camera"
 default_enabled = false
 

@@ -6,7 +6,8 @@ explicit deferred limits in `beads-2dw.18.4`.
 
 Worktrees, builds, profiles and raw evidence:
 `G:/Temp/Codex/alttp-seamless-20261027`. Original working copies are preserved.
-No release publication or delivery-folder replacement is part of this task.
+The owner authorized an experimental launcher release after the known
+implementation burndown; no release has been published yet.
 
 ## Contract
 
@@ -41,8 +42,8 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
 | 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
-| 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
+| 6. Connected dungeon floors | Initial implementation, qualification partial | Native floor-map membership with reciprocal-door fallback, original Map8/BG1/BG2 graphics, live resident actors and expanded door/plate animations. Eastern Palace native switch, room201->185, locked185->186/key consumption/reverse door, current-build save/load and replay pass. Actual stairs/other dungeons and complete lighting/effects remain unqualified. |
+| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18 -> 19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
@@ -62,7 +63,7 @@ graphics/maps are checked in or distributed.
 
 Raw command journals, screenshots and source/binary receipts are in the task
 root above. `profiles/seams/*-frames.json` records four directed crossings:
-18ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢19 east, 18ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢17 west, 21ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢29 south, 29ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢21 north. The setup places Link on a
+18 -> 19 east, 18 -> 17 west, 21 -> 29 south, 29 -> 21 north. The setup places Link on a
 native walkable corridor and explicitly leaves the seed's AsleepInBed handler;
 only controller movement performs the crossing. It is an assisted setup, not
 evidence of completing the prologue or walking through a dungeon exit.
@@ -366,3 +367,62 @@ save/load, paused zoom without time advance, a fresh ordinary seam crossing
 and both CTests pass. New Ledge/Town/Seam checkpoints use assisted placement,
 equipment and damage protection, without forcing jump/landing handlers or
 success flags. This does not complete the remaining dungeon/progression gates.
+
+
+## Connected dungeon floor checkpoint (2026-10-28, schema v10)
+
+The original 320 room streams supply reciprocal ordinary door topology. The
+in-game map tables at `$0A:F605` supply current-floor membership for mapped
+palaces, including same-floor rooms reached by special doors. Unmapped caves
+and interiors retain the connected door component. Native signed floor numbers
+and basement offsets are respected; the Eastern Palace data probe identifies
+eight rooms on 1F and four on 2F. That data probe is not a staircase traversal.
+
+Each resident room retains its original Map8 layers, native graphics/palettes,
+collision context and actor state. The same world compositor, native per-actor
+projection, activation halo, zoom and F4 controls are reused. Tile priority and
+BG1 subscreen color math use the room's native layer state. The normal dungeon
+loader and gameplay continue to own keys, shutters, pressure plates, room
+routing and door animations. Cached actors are adopted after the native loader
+installs a connected destination, before its first projected sprite draw.
+
+Private decoding initially exposed two calling-convention errors: A2 is the
+previous-room field, while the sprite-loader room is 048E; and bank-1 room
+code reads its object/door data in bank 0. The corrected loader decodes all
+eight tested rooms and restores the serialized live core exactly. Geometry
+inventory parses all 320 streams; this is content inventory, not 320 gameplay
+passes. No extracted graphics or room data are distributed.
+
+Recorded gates in the task's SERVER profiles:
+
+- `dungeon-floor-doors-final`: actual A-button pot lift/throw and pressure-plate
+  shutter, natural room201->185 crossing, live floor atlas and byte-exact
+  20-frame replay. Current-build save/load restores the atlas and actors.
+- Its bounded frame capture contains 15 native pressure-plate animation frames;
+  every captured frame retains the expanded 512x288 view.
+- `dungeon-floor-key-final`: assisted position/quadrant/camera at the authored
+  plane-0 locked door. Zero keys block entry. Supplying one key lets the native
+  routine consume it, save the opened-door bit, finish185->186 and return through
+  the open door. A40-frame replay started during travel is byte-identical.
+  Position/camera/key inventory are explicit assists; no door/travel/result flags
+  are set. Finding the key and navigating the full route are not claimed.
+- `dungeon-floor-boundary`: observed native201->185 transition states all keep
+  512x288 bounds and retain the destination's running actor state.
+- `dungeon-floor-ui-final`: queued SDL F4 enters the1536x2048 floor atlas,
+  wheel zoom works, and returning to follow while paused preserves frame/RAM.
+  The helper now clears the full SDL_Event union: a C `{0}` initializer left
+  modifier bytes unspecified in the optimized build. Physical input handling
+  is unchanged. All three CTests pass; current Light/Dark seam70-frame replays
+  remain byte-exact after the floor integration.
+
+The ordinary door routines retain their native walk/loading cadence; this does
+not claim removal of their control lock. Actual stair/pit/warp travel and the
+remaining dungeon effects still need qualification. Current-build room records
+are pointer-free and validated in schema v10; earlier experiment states are
+disposable. Native SRAM is preserved.
+
+Known implementation work still includes the other weapon collision types,
+carried-object ownership at overworld handoffs, roaming actors' terrain and
+activation, inter-pool NPC interaction/secret progression, and remaining
+interfaces/lighting/windows. This floor checkpoint does not close the full
+burndown and is not a release claim. Whole-map60 FPS remains optional.
