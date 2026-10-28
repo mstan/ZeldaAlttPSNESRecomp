@@ -304,8 +304,8 @@ static void rasterize(unsigned id) {
  r->dirty=false;
 }
 /* Outdoor native actor fields, including the word-sized authored spawn ID.
- * Keep the unique Mirror portal in the live CPU context. Area caches must
- * never acquire a second owner for it when Link crosses an ordinary seam. */
+ * Portals and held actors travel in the live CPU context; cached pools must
+ * never acquire a second owner when Link crosses an ordinary seam. */
 typedef struct NativeActor {uint8_t fields[60];} NativeActor;
 static NativeActor mirrored_actor;
 static int mirrored_slot=-1;
@@ -323,8 +323,11 @@ static void write_actor(uint8_t*ram,unsigned k,const NativeActor*in) {
  for(unsigned a=0xd00;a<=0xf90;a+=16)ram[a+k]=in->fields[n++];
  ram[0xbc0+k*2]=in->fields[n++];ram[0xbc1+k*2]=in->fields[n];
 }
-static void remove_cached_portals(uint8_t*ram) {
- for(unsigned k=0;k<16;k++)if(ram[0xe20+k]==0x6c)ram[0xdd0+k]=0;
+static bool traveling_actor(const uint8_t*ram,unsigned k) {
+ return ram[0xdd0+k]&&(ram[0xe20+k]==0x6c||ram[0xdd0+k]==10);
+}
+static void remove_cached_travelers(uint8_t*ram) {
+ for(unsigned k=0;k<16;k++)if(traveling_actor(ram,k))ram[0xdd0+k]=0;
 }
 static const uint16_t weapon_fields[]={0x380,0x385,0x38a,0x38f,0x394,0x39f,0x3a4,0x3a9,
  0x3b1,0x3c5,0x3ca,0x3cf,0x3d5,0x3db,0x3e4,0x3ea};
@@ -357,7 +360,7 @@ static void capture(unsigned id) {
     memcmp(r->vram,g_ppu->vram,sizeof r->vram)||
     memcmp(r->palette,g_ppu->cgram,sizeof r->palette))r->dirty=true;
  memcpy(r->ram,g_ram,sizeof r->ram);
- if(r->populated&&id<ZW_OUTDOOR_AREAS)remove_cached_portals(r->ram);
+ if(r->populated&&id<ZW_OUTDOOR_AREAS)remove_cached_travelers(r->ram);
  if(id>=ZW_OUTDOOR_AREAS||!collision_window)memcpy(r->tiles,g_ram+0x2000,sizeof r->tiles);
  memcpy(r->ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(r->vram,g_ppu->vram,sizeof r->vram);
@@ -1006,16 +1009,19 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs) {
 }
 static bool adopt_area(unsigned id,bool crossing) {
  WorldArea*r=areas[id];if(!r||!r->valid)return false;
- NativeActor portal;int portal_slot=-1,destination=-1;
- for(int k=15;k>=0;k--)if(g_ram[0xdd0+k]&&g_ram[0xe20+k]==0x6c){portal_slot=k;break;}
- if(portal_slot>=0) {
-  read_actor(&portal,g_ram,(unsigned)portal_slot);
-  if(!r->ram[0xdd0+portal_slot])destination=portal_slot;
-  else for(int k=15;k>=0;k--)if(!r->ram[0xdd0+k]){destination=k;break;}
+ NativeActor travelers[16];uint8_t source[16],destination[16];unsigned count=0;
+ bool occupied[16],reserved[16]={false};for(unsigned k=0;k<16;k++)occupied[k]=r->ram[0xdd0+k]!=0;
+ unsigned previous=native_area();
+ for(int k=15;k>=0;k--)if(traveling_actor(g_ram,(unsigned)k)) {
+  int dest=-1;
+  if(!occupied[k])dest=k;
+  else for(int j=15;j>=0;j--)if(!occupied[j]){dest=j;break;}
   /* Match the original dynamic allocator's expendable guard-probe policy.
-   * Never silently overwrite a physical authored actor to retain a portal. */
-  if(destination<0)for(int k=15;k>=0;k--)if(r->ram[0xe20+k]==0x41&&r->ram[0xdb0+k]){destination=k;break;}
-  if(destination<0)return false;
+   * Preflight every traveler before changing either live pool. */
+  if(dest<0)for(int j=15;j>=0;j--)if(!reserved[j]&&r->ram[0xe20+j]==0x41&&r->ram[0xdb0+j]){dest=j;break;}
+  if(dest<0)return false;
+  read_actor(&travelers[count],g_ram,(unsigned)k);source[count]=(uint8_t)k;
+  destination[count++]=(uint8_t)dest;occupied[dest]=reserved[dest]=true;
  }
  /* Only area-owned state crosses this handoff. Player action/stack, all
   * native progress/SRAM, input, audio, clocks and portal history stay live. */
@@ -1026,7 +1032,13 @@ static bool adopt_area(unsigned id,bool crossing) {
  memcpy(g_ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(g_ram+0x4000,r->ram+0x4000,0x8000);
  memcpy(g_ram+0x1d000,r->ram+0x1d000,0x3000);
- if(destination>=0)write_actor(g_ram,(unsigned)destination,&portal);
+ for(unsigned i=0;i<count;i++) {
+  write_actor(g_ram,destination[i],&travelers[i]);
+  for(unsigned k=0;k<5;k++)if(arrow_targets[k].valid&&arrow_targets[k].area==previous&&
+      !arrow_targets[k].pool&&arrow_targets[k].slot==source[i]) {
+   arrow_targets[k].area=(uint16_t)id;arrow_targets[k].slot=destination[i];
+  }
+ }
  memcpy(g_ram+0xaa0,r->ram+0xaa0,9);
  memcpy(g_ram+0xc2f8,r->ram+0xc2f8,8);
  memcpy(g_ram+0x600,r->ram+0x600,0x18);
@@ -1150,7 +1162,7 @@ void ZeldaWorldFrameEnd(void) {
    memcpy(g_ram+0xb00,areas[id]->ram+0xb00,0xf0);
    memcpy(g_ram+0xc9a,areas[id]->ram+0xc9a,0x366);
    memcpy(g_ram+0x1d000,areas[id]->ram+0x1d000,0x3000);
-   remove_cached_portals(areas[id]->ram);
+   remove_cached_travelers(areas[id]->ram);
   }else {free_pools(areas[id]);areas[id]->populated=false;failures++;}
  }
  collision_window=false;last_area=(int)id;

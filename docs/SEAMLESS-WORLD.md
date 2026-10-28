@@ -422,7 +422,23 @@ are pointer-free and validated in schema v10; earlier experiment states are
 disposable. Native SRAM is preserved.
 
 Known implementation work still includes the other weapon collision types,
-carried-object ownership at overworld handoffs, roaming actors' terrain and
+roaming actors' terrain and
 activation, inter-pool NPC interaction/secret progression, and remaining
 interfaces/lighting/windows. This floor checkpoint does not close the full
 burndown and is not a release claim. Whole-map60 FPS remains optional.
+
+## Held-object handoff checkpoint (2026-10-28)
+
+An original A-button bush lift reproduced a missing actor at18->19: Link kept
+his carrying pose after the area actor slab replaced the held bush. Held actors
+now travel with the live context like the unique Mirror portal. Cached outdoor
+pools exclude them, destination slots are reserved before any mutation, and
+attached-arrow handles follow an actor when its slot changes. Authored physical
+actors are never overwritten to make room.
+
+`native-carry-seam-final` validates a real bush lift, a40-frame byte-exact moving
+replay across18->19, current-build save/load while holding,19->18 return without
+cached held clones, and native A-button throw/break. Only player position and
+equipment were assisted; the lift/carry/throw handlers were not forced. The
+existing actual Mirror/portal seam round trip still passes after this change.
+Other carried enemy types and dungeon carry routing remain unqualified.
