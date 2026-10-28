@@ -22,3 +22,7 @@ default_enabled = false
 [[plugin]]
 feature = "widescreen"
 id = "zelda-alttp.widescreen"
+
+[[plugin]]
+feature = "widescreen"
+id = "zelda-alttp.display-mode"
