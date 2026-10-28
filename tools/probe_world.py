@@ -38,6 +38,27 @@ def probe(args):
             isolation = command('game world_isolation')
             assert isolation['restore_exact'] and isolation['abort_exact']
             assert isolation['idle'] and not isolation['depth'] and not isolation['interrupt']
+            if args.animation_reference:
+                # References come from feature-off native exits, independent of
+                # the seamless decoder (ordinary terrain and Death Mountain).
+                reference = json.loads(args.animation_reference.read_text(encoding='utf-8'))
+                command('game world_view atlas')
+                command('game world')
+                offset = world['area'] & 64
+                animations = []
+                seen = set()
+                for epoch in range(4):
+                    for head in HEADS:
+                        animation = command(f'game world_animation {head + offset}')
+                        expected = reference['mountain' if head in (3, 5, 7) else 'regular']
+                        assert animation['cached_frames'] == expected, animation
+                        assert animation['cached_vram'] in expected, animation
+                        if head == 27:
+                            seen.add(animation['cached_vram'])
+                        animations.append(animation)
+                    time.sleep(.15)
+                assert len(seen) > 1, 'Neighbor water animation did not advance'
+                result['animation_samples'] = animations
             if args.coverage:
                 command('game world_view atlas')
                 # Queued commands run after activation/ticking at the frame boundary.
@@ -89,6 +110,8 @@ if __name__ == '__main__':
     parser.add_argument('--port', required=True, type=int)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--coverage', action='store_true')
+    parser.add_argument('--animation-reference', type=Path,
+                        help='JSON regular/mountain frame hashes from feature-off native exits')
     parser.add_argument('--edge', nargs=2, metavar=('AREA', 'DIRECTION'))
     parser.add_argument('--frames', type=int, default=70)
     parser.add_argument('--mask', type=lambda s: int(s, 16), default=0)

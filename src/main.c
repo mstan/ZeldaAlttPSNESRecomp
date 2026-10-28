@@ -401,6 +401,7 @@ static void DrawPpuFrameWithPerf(void) {
     /* Paused resize/zoom composes from the frozen native image. Rendering
      * another console field can run raster IRQ work and is not a pause. */
     if (!g_paused || !native_valid) {
+      ZeldaWorldPrepareNativeHud();
       RtlDrawPpuFrame(native, (size_t)g_snes_width*4, g_ppu_render_flags);
       native_valid = true;
     }
@@ -1527,7 +1528,7 @@ error_reading:;
      * whole crash-capture pipeline (minidump + report + crash copy). */
     host_report_crash_test_tick();
 
-    if (ZeldaWorldPollUI()) HandleCommand(kKeys_Pause, true);
+    if (ZeldaWorldPollUI(g_paused!=0)) HandleCommand(kKeys_Pause, true);
     while (SDL_PollEvent(&event)) {
       if (ZeldaWorldEvent(&event)) continue;
       switch (event.type) {

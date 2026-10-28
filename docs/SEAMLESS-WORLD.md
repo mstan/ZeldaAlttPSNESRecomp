@@ -26,6 +26,11 @@ Preserve stock/adaptive rendering, MSU audio and native SRAM. Current-build
 states/rewind/rollback must work; old build states have no compatibility
 promise. No netplay qualification is implied.
 
+Owner clarification, 2026-10-28: full-map 60 FPS is an optional stretch goal,
+never a completion blocker. Slowdown from rendering and simulating the whole
+map is acceptable. Measure costs to describe the experience and identify
+correctness regressions; do not gate the atlas on maintaining 60 FPS.
+
 ## Burndown
 
 | Milestone | Status | Evidence / next gate |
@@ -33,11 +38,11 @@ promise. No netplay qualification is implied.
 | 0. Frozen baseline | Built | Game `8eee8b6`, engine `68896b6`, UI `eaf99ca`; GCC 15.2 MinGW, SDL3, trace on. Baseline executable SHA256 `0d765132d7ce3c055e22a95ad51ed85774ec7d708e674dcfa668252b8e7b4d5d`. Verified identical generation inputs. |
 | 1. Isolated native calls | Initial gates passed | Success and forced interrupt-context/budget abort restore the serialized guest exactly, keep state generation, and leave bridge/host stack idle. Native decoder round trip passed. Main-thread-only entry; queued TCP mutations. Broader portability/side-effect qualification pending. |
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
-| 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and centered HUD. 512x288 follow, 4096x4128 atlas and paused 300x500 portrait captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
+| 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
 | 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
 | 6. Connected dungeon floors | Pending | Content-derived membership, floors/layers, doors, keys/shutters/puzzles. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18→19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
+| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18Ã¢â€ â€™19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
@@ -57,7 +62,7 @@ graphics/maps are checked in or distributed.
 
 Raw command journals, screenshots and source/binary receipts are in the task
 root above. `profiles/seams/*-frames.json` records four directed crossings:
-18→19 east, 18→17 west, 21→29 south, 29→21 north. The setup places Link on a
+18Ã¢â€ â€™19 east, 18Ã¢â€ â€™17 west, 21Ã¢â€ â€™29 south, 29Ã¢â€ â€™21 north. The setup places Link on a
 native walkable corridor and explicitly leaves the seed's AsleepInBed handler;
 only controller movement performs the crossing. It is an assisted setup, not
 evidence of completing the prologue or walking through a dungeon exit.
@@ -129,7 +134,7 @@ Pointer-free area/pool/slot/type/spawn handles temporarily expose the actual
 target to the native attached-arrow routine, then restore the live slot
 before any enemy executes. Schema/feature identity is now `alttp-world-v4`.
 This does not qualify every enemy, projectile, native reference or progression
-phase. Far-projectile terrain windows and native secret indexing are open.
+phase. Far-projectile native terrain windows now pass the ray check below; native secret indexing remains open.
 
 `profiles/viewport-input-qualification/commands.jsonl` records actual process
 SDL F4 and wheel events. F4 toggles the atlas without loading a deliberately
@@ -164,6 +169,56 @@ composition, before complete interactions and without matched host isolation.
 This is not a 60Hz result or a qualified performance comparison. Retain raw
 samples and measure the completed feature before choosing an optimization.
 
+## Owner-reported presentation fixes, 2026-10-28
+
+The owner found stale scene pixels behind the HUD, flashing water/grass and
+corrupted terrain after travel, and inventory falling back to an earlier
+native area. These are correctness fixes within the experiment.
+
+The HUD now uses the engine's transparent BG3 capture during the one normal
+native scanout. Magic/items, counters and hearts anchor to the viewport's
+left, center and right at a window-based scale independent of world zoom.
+Terrain fills the complete canvas. Inventory uses the same native BG3 layer
+over the expanded world; the menu's native input, slide animation and actor
+pause rules remain authoritative. Active-area sprite projection remains in
+place while the native inventory draws. Other native interfaces/effects are
+still unqualified and may use the existing fallback.
+
+The animated-terrain decoder incorrectly passed the graphics pack in A. The
+ROM entry at `$00:D394` reads **Y**, so new areas loaded pack 0 (castle art)
+instead of ordinary pack `$5A` or mountain pack `$58`. Each cached area now
+receives the right three native frames. Neighbor rendering follows the live
+native animation clock using its own pack, without advancing simulation.
+`profiles/world-qualification-light-v6/qualification.json` and its Dark World
+counterpart compare all 80 canonical areas with feature-off native exits,
+observe changing neighbor animation, verify complete authored populations,
+and pass 70-frame byte-exact replay (including a real Light World crossing).
+Reference receipts are in `evidence/native-animation-reference-v6.json`.
+
+`profiles/hud-layer-v6-final/result.json` passes native layer extraction,
+paused zoom/atlas, successful/aborted isolation and 20-frame replay.
+`profiles/inventory-layer-v6-final/result.json` passes inventory opening and
+closing after an area adoption, 900x1500 paused resizing with a frozen native
+frame, current-build save/load while inventory is open, and 20-frame replay.
+Composed captures and actual GPU framebuffer readbacks are retained beside
+these receipts. State identity is `alttp-world-v6`, including native UI pixels.
+
+Native collision buffers now switch between Link's world window, each
+traveling weapon's world window and the active area's canonical terrain for
+its enemies. Areas near a global projectile stay active. The content-derived
+`profiles/native-projectile-terrain-v3/result.json` gate demonstrates a native
+arrow reaching a wall beyond Link's old 1024px collision window and stopping
+there; guard positions were assisted away from the ray. `profiles/collision-window-qualification`
+retains population, moving replay and bounded guard sight-probe observations.
+The invisible probes now use their parent's native view for lifetime
+rejection; centering on each probe had prevented that rejection.
+
+The corrected owner build is staged separately in `owner-demo-fixed`, with
+fresh build-specific Pyramid, Village and Seam checkpoints. The earlier
+owner profile, SRAM, settings and observations remain preserved. Full-map
+60 FPS remains optional, and connected dungeon floors and the remaining
+interaction/progression gates remain unfinished.
+
 ## Developer probes
 
 The normal TCP server handles game commands on its network thread. World
@@ -189,3 +244,7 @@ never launches a game or chooses a save/profile and preserves prior evidence.
 `game world_area ID [POOL]` inspects an additional pool. The `world_qa_*` and
 `world_place_actor` commands are explicit encounter assists, not gameplay
 completion claims.
+
+`--animation-reference PATH` extends `tools/probe_world.py` with native
+feature-off `regular`/`mountain` frame-hash arrays; it checks every canonical
+area and observes changing neighbor animation before the replay gate.
