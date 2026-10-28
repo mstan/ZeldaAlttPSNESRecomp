@@ -21,5 +21,14 @@ int main(void) {
  assert(ZeldaWorldLinkCoordinate(65534)==0);
  assert(ZeldaWorldLinkCoordinate(4081)==4080);
  assert(ZeldaWorldLinkCoordinate(0)==0);
+ /* The native ledge landing search rebases Y and Z together. That must
+  * leave the camera target unchanged, including at takeoff and landing. */
+ assert(ZeldaWorldFollowY(1912,4,1)==1908);
+ assert(ZeldaWorldFollowY(1992,84,1)==1908);
+ assert(ZeldaWorldFollowY(1992,0,1)==1992);
+ assert(ZeldaWorldFollowY(1992,UINT16_MAX,1)==1992);
+ assert(ZeldaWorldFollowY(1992,84,0)==1992);
+ assert(ZeldaWorldFollowY(8,16,1)==-8);
+ assert(ZeldaWorldFollowY(2000,0xfff0,1)==2016);
  return 0;
 }

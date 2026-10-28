@@ -135,6 +135,9 @@ static struct {
 } replay;
 static uint16_t rd16(unsigned off) {return g_ram[off]|g_ram[off+1]<<8;}
 static void wr16(unsigned off,unsigned n) {g_ram[off]=(uint8_t)n;g_ram[off+1]=(uint8_t)(n>>8);}
+/* The vertical pair follows BG3 X at $E4; these are not four
+ * consecutive words. Projection must restore BG2 Y as well as BG1 Y. */
+static const uint8_t scroll_offsets[4]={0xe0,0xe2,0xe6,0xe8};
 static int clamp(int x,int a,int b) {return x<a?a:x>b?b:x;}
 static unsigned owner(unsigned id) {return heads[id&63]|(id&64);}
 static unsigned area_size(unsigned id) {
@@ -184,7 +187,7 @@ static uint32_t color(unsigned p) {
  return 0xff000000u|((r<<3|r>>2)<<16)|((g<<3|g>>2)<<8)|(b<<3|b>>2);
 }
 static void capture_background(WorldArea*r) {
- for(unsigned i=0;i<4;i++)r->background.scroll[i]=rd16(0xe0+i*2);
+ for(unsigned i=0;i<4;i++)r->background.scroll[i]=rd16(scroll_offsets[i]);
  r->background.main=g_ram[0x1c];r->background.sub=g_ram[0x1d];
  r->background.select=g_ram[0x99];r->background.math=g_ram[0x9a];
  r->background.fixed=(g_ram[0x9c]&31)|((g_ram[0x9d]&31)<<5)|((g_ram[0x9e]&31)<<10);
@@ -458,12 +461,13 @@ void ZeldaWorldLinkBegin(void) {
  live_piece_count=0;collect_oam(r,live_pieces,&live_piece_count,rd16(0xe2),rd16(0xe8));
  memcpy(link_native_oam,g_ram+0x800,sizeof link_native_oam);
  memcpy(link_allocator,g_ram+0xfe0,sizeof link_allocator);memcpy(link_pointer,g_ram+0x90,sizeof link_pointer);
- for(unsigned i=0;i<4;i++)link_scroll[i]=rd16(0xe0+i*2);
+ for(unsigned i=0;i<4;i++)link_scroll[i]=rd16(scroll_offsets[i]);
  /* Link's native OAM routine clips individual body pieces at the 256px
   * screen edges. Draw him in a centered native view, just like world actors,
   * before projecting the resulting pieces into the expanded scene. */
  wr16(0xe0,rd16(0x22)-128);wr16(0xe2,rd16(0x22)-128);
- wr16(0xe6,rd16(0x20)-112);wr16(0xe8,rd16(0x20)-112);
+ int draw_y=ZeldaWorldFollowY(rd16(0x20),rd16(0x24),1);
+ wr16(0xe6,draw_y-112);wr16(0xe8,draw_y-112);
  for(unsigned i=0;i<128;i++)g_ram[0x801+i*4]=0xf0;
  memset(g_ram+0xa20,0,128);
  link_projection=true;
@@ -474,7 +478,7 @@ void ZeldaWorldLinkEnd(void) {
  if(r)collect_oam(r,live_pieces,&live_piece_count,rd16(0xe2),rd16(0xe8));
  memcpy(g_ram+0x800,link_native_oam,sizeof link_native_oam);
  memcpy(g_ram+0xfe0,link_allocator,sizeof link_allocator);memcpy(g_ram+0x90,link_pointer,sizeof link_pointer);
- for(unsigned i=0;i<4;i++)wr16(0xe0+i*2,link_scroll[i]);
+ for(unsigned i=0;i<4;i++)wr16(scroll_offsets[i],link_scroll[i]);
  link_projection=false;link_projected=live_pieces_valid=true;
 }
 static void clear_projected_oam(void) {
@@ -964,7 +968,7 @@ void ZeldaWorldFrameEnd(void) {
  collision_window=false;last_area=(int)id;
  uint64_t before=SDL_GetPerformanceCounter();
  int w=clamp(drawable_w/zoom,128,ZW_WORLD),h=clamp(drawable_h/zoom,96,ZW_WORLD);
- int x=(int)rd16(0x22),y=(int)rd16(0x20);
+ int x=(int)rd16(0x22),y=ZeldaWorldFollowY(rd16(0x20),rd16(0x24),g_ram[0x78]);
  for(unsigned next=(unsigned)active_world;next<(unsigned)active_world+64;next++) {
   if(owner(next)!=next)continue;
   int ax=(next&7)*512,ay=((next&63)>>3)*512,size=(int)area_size(next);
@@ -1076,7 +1080,7 @@ const uint32_t *ZeldaWorldPresent(const uint32_t *native,int native_pitch,
  }
  uint64_t before=SDL_GetPerformanceCounter();
  camera_x=atlas?0:clamp((int)rd16(0x22)-w/2,0,ZW_WORLD-w);
- camera_y=atlas?0:clamp((int)rd16(0x20)-h/2,0,ZW_WORLD-h);
+ camera_y=atlas?0:clamp(ZeldaWorldFollowY(rd16(0x20),rd16(0x24),g_ram[0x78])-h/2,0,ZW_WORLD-h);
  memset(canvas,0,count*4);
  memset(canvas_priority,0,count);
  for(unsigned id=(unsigned)active_world;id<(unsigned)active_world+64;id++) {
@@ -1478,7 +1482,7 @@ static void clear_pending(void) {
  }
  pending_load_ok=false;
 }
-const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v8":NULL;}
+const char *ZeldaWorldStateIdentity(void) {return enabled?"alttp-world-v9":NULL;}
 static void area_stream(SaveLoadInfo*sli,WorldArea*r) {
  sli->func(sli,&r->background,sizeof r->background);
  sli->func(sli,r->ram,sizeof r->ram);sli->func(sli,r->vram,sizeof r->vram);
@@ -1490,7 +1494,7 @@ static void pool_stream(SaveLoadInfo*sli,WorldActorPool*p) {
 }
 void ZeldaWorldStateSave(SaveLoadInfo*sli) {
  if(!enabled)return;
- WorldStateHeader h={WORLD_STATE_MAGIC,8,0,(uint32_t)record_bytes(),
+ WorldStateHeader h={WORLD_STATE_MAGIC,9,0,(uint32_t)record_bytes(),
   active_world,last_area,zoom,atlas,camera_x,camera_y,native_oam_x,native_oam_y,handoffs};
  h.global_count=live_piece_count;h.global_valid=live_pieces_valid;
  memcpy(h.global_pieces,live_pieces,live_piece_count*sizeof(*live_pieces));
@@ -1515,7 +1519,7 @@ bool ZeldaWorldStatePreflight(const void*data,size_t size) {
  if(!core||core>size||size-core<sizeof(WorldStateHeader))return false;
  const uint8_t*p=(const uint8_t*)data+core;
  WorldStateHeader h;memcpy(&h,p,sizeof h);p+=sizeof h;
- if(h.magic!=WORLD_STATE_MAGIC||h.schema!=8||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
+ if(h.magic!=WORLD_STATE_MAGIC||h.schema!=9||h.count>ZW_AREAS||h.record_bytes!=record_bytes()||
     (h.world!=-1&&h.world!=0&&h.world!=64)||h.zoom<1||h.zoom>8||(h.atlas!=0&&h.atlas!=1)||
     h.last < -1||h.last>=ZW_AREAS||h.global_count>1024||h.global_valid>1||h.weapon_count>1024||h.weapon_reserved||h.hud_kind>WORLD_UI_INVENTORY||h.hud_reserved)return false;
  for(unsigned j=0;j<h.global_count;j++) {
