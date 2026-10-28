@@ -20,6 +20,8 @@ void ZeldaWorldPrepareNativeHud(void);
 bool ZeldaWorldPollUI(bool paused);
 void ZeldaWorldActorBegin(void);
 void ZeldaWorldEntranceBegin(void);
+void ZeldaWorldLinkBegin(void);
+void ZeldaWorldLinkEnd(void);
 void ZeldaWorldSpritesEnd(void);
 void ZeldaWorldRewardBegin(void);
 void ZeldaWorldBombDamageBegin(void);

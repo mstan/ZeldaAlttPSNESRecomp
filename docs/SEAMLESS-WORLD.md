@@ -302,3 +302,40 @@ checkpoints: Arch plus native map, Pyramid-side Cave, and Seam. Only the Arch
 setup has assisted damage protection to separate occlusion from hit blinking.
 The first test is paused in a normal window with normal audio. Earlier owner
 SRAM/settings/states/failed notes remain in their original profiles.
+
+
+## Owner presentation follow-up (2026-10-28, current schema v8)
+
+The owner confirmed cave entry and exit working in v7. Three separate later
+reports remained: black tree corners, a small Link flicker at seams, and a zoom
+jump immediately before entry/after exit. The original individual observations
+are retained in `owner-demo-followup/observations.json` outside the repository.
+
+Native Pyramid captures show a deliberately black backdrop, with BG1 on the
+subscreen supplying terrain through transparent BG2 pixels. Each area now runs
+the original overlay decoder/NMI upload and retains native scroll, palette,
+subscreen and color-math state. The compositor resolves that layer behind BG2
+and the eligible OBJ palettes. A native-versus-expanded Pyramid capture matches
+40,671/40,960 registered terrain pixels (99.29%; a few live actors advance),
+with zero new black pixels. Native scanout starts at line 1; comparison accounts
+for that registration. This does not qualify all weather, lighting or windows.
+
+Frame-by-frame area 82->83 evidence reproduced missing Link body pieces at the
+native 256px view edges. Link's original drawing routine now uses its own
+centered projection, retaining native blink, equipment and foreground priority.
+Both AOT and interpreted entries/returns are covered; generator tests include
+bank 0D and all width variants. Before/after image sequences are retained in
+`profiles/seam-flicker-before` and `profiles/seam-flicker-after`.
+
+Outdoor closing/opening iris modules and the exit walk now retain the expanded
+view. The native transition still owns loading, input and timing; iris progress
+is applied over the actual viewport. An actual cave round trip checks every
+captured visible outdoor transition frame at 512x288; interiors retain their
+native view. A 70-frame moving seam replay remains byte-identical. The background
+metadata is serialized in v8; earlier experimental snapshots are disposable.
+
+Combined checks: native X-map open/zoom/close with replay, HUD/atlas paused redraw
+and exact isolated-call restoration, inventory portrait/current-build load and
+replay, and both CTests pass. Full-map 60 FPS remains optional. Connected dungeon
+floors, other weapons/carry/migration/progression, remaining effects and broader
+qualification are still open. No merge or release is claimed.

@@ -14,8 +14,8 @@ class WorldOverridesTest(unittest.TestCase):
             root = Path(directory)
             source = '\n'.join(
                 f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n  '+
-                ('RecompStackPop();\n  ' if name in ('Sprite_Main','Ancilla_Main') else '')+'return 0;\n}'
-                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'Unrelated')
+                ('RecompStackPop();\n  ' if name in ('Sprite_Main','Ancilla_Main','LinkOam_Main') else '')+'return 0;\n}'
+                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'LinkOam_Main', 'Unrelated')
                 for m in (0, 1) for x in (0, 1)
             )
             target = root / 'bank06_test_v2.c'
@@ -23,6 +23,11 @@ class WorldOverridesTest(unittest.TestCase):
             entrances = root / 'bank1b_test_v2.c'
             entrances.write_text('\n'.join(
                 f'RecompReturn Overworld_UseEntrance_M{m}X{x}(CpuState *cpu) {{ return 0; }}'
+                for m in (0, 1) for x in (0, 1)))
+            player = root / 'bank0d_test_v2.c'
+            player.write_text('\n'.join(
+                f'RecompReturn LinkOam_Main_M{m}X{x}(CpuState *cpu) {{ '
+                'RecompStackPopYield(); RecompStackPop(); return 0; }'
                 for m in (0, 1) for x in (0, 1)))
 
             def run(*args):
@@ -33,9 +38,11 @@ class WorldOverridesTest(unittest.TestCase):
             self.assertEqual(run().returncode, 0)
             first = target.read_bytes()
             self.assertEqual(entrances.read_bytes().count(b'ZeldaWorldEntranceBegin();'), 4)
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 32)
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-SPRITES-END */'), 8)
-            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin'):
+            self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkBegin();'), 4)
+            self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkEnd();'), 8)
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 36)
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-SPRITES-END */'), 12)
+            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin','ZeldaWorldLinkBegin','ZeldaWorldLinkEnd'):
                 self.assertEqual(first.count((hook + '();').encode()), 4)
             self.assertEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)
