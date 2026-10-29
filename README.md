@@ -28,7 +28,11 @@ projects: recompile the CPU, emulate the silicon.
 The ROM is **never** redistributed — you supply your own legally-dumped
 copy.
 
-## Current status: playable through early dungeon
+**New:** [Seamless World](#seamless-world-experimental) is available as an
+experimental launcher mod, with live expanded worlds, zoom and connected
+dungeon floors. [Download the Windows experimental release](https://github.com/mstan/ZeldaAlttPSNESRecomp/releases/tag/v0.7.0-experimental.1).
+
+## Current status
 
 Hand-verified end-to-end through:
 
@@ -40,11 +44,12 @@ Hand-verified end-to-end through:
 - Audio (HLE SPC upload of the cartridge's stock sound engine) plays
   through title, gameplay, sword/item SFX, and music transitions.
 
-No catastrophic visible regressions surfaced through the verified
-content. Later content (Hyrule Castle interior past the prologue,
-Sanctuary onward, the Dark World) is not yet hand-verified but is
-expected to play similarly. If you hit a visible regression, please
-open an issue with a savestate.
+The original route checks above cover the early game. Seamless World also has
+focused later-game, Dark World and dungeon checks, described below and in
+[its validation notes](docs/SEAMLESS-WORLD.md). These checks do not establish
+a complete playthrough or an audit of every quest and boss. If you hit a
+visible regression, please open an issue with reproduction steps and a
+current-build savestate.
 
 Active development; expect:
 
@@ -155,23 +160,54 @@ section.
    run the slower reference implementation.
 3. Rebuild as above.
 
-## Seamless World experiment
+## Seamless World (experimental)
 
-Enable **Seamless World** in the launcher's **Mods** page. It is experimental
-and disabled by default. Use your stock USA ROM; no separate map data is needed.
+Explore beyond the original screen boundaries. **Seamless World** presents the
+Light World and Dark World as live, continuous maps, and shows connected rooms
+on the current dungeon floor. Zoom out to see more of the game while enemies,
+items and projectiles continue to run using the game's native routines.
 
-The camera shows live terrain and persistent native actors across Light/Dark
-World boundaries and connected dungeon floors. The mouse wheel changes zoom;
-**F4** toggles the whole current world or dungeon floor. The HUD stays anchored
-to the viewport. The original inventory and game map retain their own controls.
-Special entrances, stairs, pits and world changes retain native routing and
-animations. Rendering the whole map can slow down;60 FPS is not a requirement.
+![Expanded Dark World gameplay around the Pyramid, with active enemies across area boundaries and the HUD anchored to the viewport](docs/images/seamless-dark-world.png)
 
-This experiment is for local play. Native in-game saves remain separate from
-build-specific save states. Stock presentation, adaptive widescreen and MSU-1
-remain available. Representative gameplay, state and rendering checks are
-documented in [the burndown](docs/SEAMLESS-WORLD.md); this is not a full-game or
-netplay qualification.
+Enable **Seamless World** in the launcher's **Mods** page in the
+[Windows experimental release](https://github.com/mstan/ZeldaAlttPSNESRecomp/releases/tag/v0.7.0-experimental.1).
+It is marked **Experimental** and **disabled by default**. Supply the stock
+USA ROM; no ROM patch or separate map download is needed.
+
+- **Continuous overworld:** ordinary area crossings keep the camera moving
+  with Link. Actors retain their state across crossings, with combat, pickups,
+  carried objects and projectiles working across area boundaries.
+- **Connected dungeon floors:** see neighboring rooms together while native
+  doors, keys, shutters and pressure plates retain their behavior. Stairs and
+  pits still take their authored routes between floors and rooms.
+- **Adjustable view:** resize the window to reveal more in either direction,
+  use the **mouse wheel** to change zoom, or press **F4** to toggle the whole
+  current world or dungeon floor. F4 is separate from the game's original map.
+- **Native presentation and travel:** the HUD follows the actual viewport;
+  inventory, dialogue and the original game map keep their controls. Caves,
+  special entrances, warps and Light/Dark World changes keep native routing.
+
+<img src="docs/images/seamless-dark-world-atlas.png" alt="The complete live Dark World in the F4 whole-world view" width="800">
+
+*F4 reveals the whole current world. This is the live game view; visible
+terrain and actors come from the supplied ROM.*
+
+![Connected Eastern Palace second-floor rooms shown together, with enemies and Link visible in their native rooms](docs/images/seamless-dungeon-floor.png)
+
+*A connected dungeon floor. Native stairs change the current floor.*
+
+In the camera-following view, visible areas and a surrounding halo simulate;
+other areas retain their state. The whole-map view activates the entire
+current world or floor, so **large views can slow down**. Full-map 60 FPS is
+not a requirement for this experiment.
+
+This preview is for **local play**. Representative checks cover terrain,
+rendering, boundary interactions, weapons, NPCs, puzzles, dungeon travel and
+current-build save/load and replay. Full-game coverage, every enemy/quest
+variant, netplay and Linux/macOS runtime qualification remain open. See
+[the burndown and validation notes](docs/SEAMLESS-WORLD.md) for specific limits.
+Native in-game saves remain separate from build-specific save states. Stock
+presentation, adaptive widescreen and MSU-1 remain available.
 
 ## MSU-1 audio
 

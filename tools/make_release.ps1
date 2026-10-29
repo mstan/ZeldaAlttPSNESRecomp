@@ -114,6 +114,7 @@ Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
 New-Item -ItemType Directory -Path (Join-Path $stage 'docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'docs\COVERAGE_2026-10-18.md') -Destination (Join-Path $stage 'docs')
 Copy-Item -LiteralPath (Join-Path $root 'docs\SEAMLESS-WORLD.md') -Destination (Join-Path $stage 'docs')
+Copy-Item -LiteralPath (Join-Path $root 'docs\images') -Destination (Join-Path $stage 'docs') -Recurse
 Copy-Item -LiteralPath $assets -Destination $stage -Recurse
 # Release-owned mod catalog, when the build stages one. Ships as a nested
 # directory tree, which is exactly what made portable ZIP entry names matter

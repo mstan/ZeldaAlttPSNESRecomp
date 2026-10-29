@@ -7,7 +7,11 @@ explicit deferred limits in `beads-2dw.18.4`.
 Worktrees, builds, profiles and raw evidence:
 `G:/Temp/Codex/alttp-seamless-20261027`. Original working copies are preserved.
 The owner authorized an experimental launcher release after the known
-implementation burndown. The Windows candidate is `0.7.0-experimental.1`.
+implementation burndown. The Windows experimental release is
+[0.7.0-experimental.1](https://github.com/mstan/ZeldaAlttPSNESRecomp/releases/tag/v0.7.0-experimental.1).
+It is a GitHub prerelease; the launcher mod is experimental and default-off.
+The [README](../README.md#seamless-world-experimental) includes gameplay,
+whole-world and connected-floor screenshots.
 
 ## Contract
 
@@ -44,7 +48,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 5. Cross-area interactions | Implemented; representative gates passed | Sword/parry, native player damage/pickups, carried objects, arrows/bombs, other weapon families, all three medallions, NPC choices/payment/receipts, authored secrets and peg/fixed puzzles have focused gates. Full quest and enemy-variant coverage is not claimed. |
 | 6. Connected dungeon floors | Implemented; representative gates passed | Native floor membership, Map8/BG1/BG2/actors, ordinary and locked doors, pot/plate shutters, native153/1F->218/2F stairs, one live lamp cone and cross-room weapon hits. Full dungeon/boss coverage is not claimed. |
 | 7. Presentation and state | Current-build gates passed | Pointer-free v11 cache and strict preflight; exact moving, weapon, dialogue and medallion replays; disk save/load during inventory/carrying/weapons; Mirror/portal return; native enemy death and Continue. Native prologue text was skipped separately after Continue. |
-| 8. Qualification/handoff | Windows release candidate | Clean trace-off build and four CTests; six generated-hook tests; production/native-image checks, stock/adaptive/MSU fallback and archive audit. Prepared Pyramid/Village/Palace checkpoints preserve individual owner observations. Full-map60FPS and netplay are not gates. |
+| 8. Qualification/handoff | Windows experimental release published | Clean trace-off build and four CTests; six generated-hook tests; production/native-image checks, stock/adaptive/MSU fallback and archive audit. Prepared Pyramid/Village/Palace checkpoints preserve individual owner observations. Full-map60FPS and netplay are not gates. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
 a passed gameplay gate. Record failures and unverified content separately.
