@@ -41,7 +41,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Roaming activation, native seam walking and terrain collision have initial gates. Attached arrows retain target references across handoffs and extra pools. Global spells, authored secret indices, puzzle/NPC progression and broader inter-pool qualification remain open. |
+| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Roaming activation, native seam walking and terrain collision have initial gates. Attached arrows retain target references across handoffs and extra pools. Native NPC/item receipts and global spell damage now have focused gates below. Authored secret indices, complete spell presentation and broader puzzle/inter-pool qualification remain open. |
 | 6. Connected dungeon floors | Initial implementation, qualification partial | Native floor-map membership with reciprocal-door fallback, original Map8/BG1/BG2 graphics, live resident actors and expanded door/plate animations. Eastern Palace native switch, room201->185, locked185->186/key consumption/reverse door, current-build save/load and replay pass. Actual stairs/other dungeons and complete lighting/effects remain unqualified. |
 | 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18 -> 19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
@@ -160,10 +160,10 @@ Configure with `-DBUILD_TESTING=ON` to run it and the generation-hook test via
 CTest. Extra pool memory is reserved outside guest scopes, with unused and
 failed output allocations reclaimed after the scope returns.
 
-Cross-area projectile collision/lifetime, enemy migration, authored secret
-indices, NPC receipts and other one-time progression remain incomplete gates.
-Native object references and enemy-to-enemy interactions across separate pools
-are not qualified. Dungeon floors still use the normal renderer.
+Broader projectile/terrain variants, authored secret indices and other one-time
+progression remain incomplete gates. Native object references and enemy-to-enemy
+interactions across separate pools are not qualified. Connected dungeon floors
+use the independent compositor; lighting and cross-room projectiles remain open.
 
 Initial full-atlas samples were about 30.9ms native simulation plus 7.3ms
 composition, before complete interactions and without matched host isolation.
@@ -522,3 +522,39 @@ exact guest-scope success/abort restoration. QA is muted and CPU-capped on
 SERVER; its frame costs are not performance measurements. Broader actor and
 terrain variants remain unqualified. NPC/secret progression, global spells,
 dungeon projectile/effect coverage and travel/release checks remain open.
+
+## Native interaction and medallion checkpoint (2026-10-28)
+
+NPC message and item-receipt entries identify interactive native actors.
+Private ticks defer quest-changing transactions; a nearby interactive pool
+is paged into the live native machine to run its original dialogue, choices,
+payment and receipt. Whole-pool swaps preserve native slot references and
+remap attached arrows. Actor adoption now copies actor fields precisely,
+preserving Link's previous position and global history/control fields.
+The earlier broad slab copy could teleport Link when dialogue restored FC2/FC4.
+
+`native-quest-vendor-boundary-v3` exercises a real Bottle Vendor transaction
+with Link geographically in area34 and the vendor resident in24. Native
+dialogue, default Yes choice, rupee goal150->50, bottle receipt and persistent
+purchase flag pass without forcing result flags. Vendor relocation, starting
+rupees/inventory and Link placement are explicit assists.
+`native-quest-window-final-v2` collects the authored Mushroom from additional
+pool1, opens its original dialogue, retains the512x288 world and anchored HUD,
+and passes60/40-frame byte-exact replays, current-build disk save/load and
+exact scope success/abort restoration. The textbox has its original opaque
+black backing rather than showing terrain through native transparent BG3.
+
+Bombos, Ether and Quake replay their original damage routine against other
+active pools. Casting, magic cost, timing and player control run once live;
+private actors receive the native FC1 freeze. `native-medallion-qualified-v2-*`
+passes100-frame byte-exact impact replay for all three, with stationary remote
+guards during casting and normal freeze release. Bombos queues native burn253,
+Ether queues freeze254, and Quake transforms the guard into native type143.
+The initial Bombos assertion missed pending damage during the native freeze;
+it was corrected to observe the native queue and cast completion.
+
+State identity/schema is now `alttp-world-v11`, including interactive actor
+tags. Three regeneration-hook tests pass. Tested SERVER executable SHA256:
+`a77f68fd67caab3d3f5d605c0b32df7a9eb46a002310afcaf3674ba175e614b1`.
+Authored secrets, complete spell palette/rumble presentation, dungeon projectile
+terrain/lighting and focused travel/release qualification remain open.

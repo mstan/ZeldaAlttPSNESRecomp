@@ -9,13 +9,38 @@ SCRIPT = Path(__file__).with_name('apply_world_overrides.py')
 
 
 class WorldOverridesTest(unittest.TestCase):
+    def test_native_interaction_and_item_entries(self):
+        with tempfile.TemporaryDirectory(prefix='alttp-world-interactions-') as directory:
+            root = Path(directory)
+            dialogue = root / 'bank05_test_v2.c'
+            item = root / 'bank07_test_v2.c'
+            dialogue.write_text('\n'.join(
+                f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{ return 0; }}'
+                for name in ('Sprite_ShowSolicitedMessage','Sprite_ShowMessageOnContact',
+                             'Sprite_ShowMessageUnconditional','Sprite_ShowMessageMinimal')
+                for m in (0,1) for x in (0,1)))
+            item.write_text('\n'.join(
+                f'RecompReturn Link_ReceiveItem_M{m}X{x}(CpuState *cpu) {{ return 0; }}'
+                for m in (0,1) for x in (0,1)))
+            def run(*args):
+                return subprocess.run([sys.executable,str(SCRIPT),'--gen-dir',str(root),*args],
+                                      capture_output=True,text=True)
+            self.assertNotEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0)
+            first = (dialogue.read_bytes(),item.read_bytes())
+            self.assertEqual(first[0].count(b'ZeldaWorldInteractionBegin();'),16)
+            self.assertEqual(first[1].count(b'ZeldaWorldItemReceiptBegin();'),4)
+            self.assertEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0)
+            self.assertEqual(first,(dialogue.read_bytes(),item.read_bytes()))
+
     def test_all_widths_idempotence_and_check(self):
         with tempfile.TemporaryDirectory(prefix='alttp-world-hooks-') as directory:
             root = Path(directory)
             source = '\n'.join(
                 f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n  '+
                 ('RecompStackPop();\n  ' if name in ('Sprite_Main','Ancilla_Main','LinkOam_Main') else '')+'return 0;\n}'
-                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'LinkOam_Main', 'Ancilla_CheckInitialTile_A', 'Overworld_OperateCameraScroll', 'Hookshot_ShouldIEvenBotherWithTiles', 'Unrelated')
+                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Medallion_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'LinkOam_Main', 'Ancilla_CheckInitialTile_A', 'Overworld_OperateCameraScroll', 'Hookshot_ShouldIEvenBotherWithTiles', 'Unrelated')
                 for m in (0, 1) for x in (0, 1)
             )
             target = root / 'bank06_test_v2.c'
@@ -40,9 +65,9 @@ class WorldOverridesTest(unittest.TestCase):
             self.assertEqual(entrances.read_bytes().count(b'ZeldaWorldEntranceBegin();'), 4)
             self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkBegin();'), 4)
             self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkEnd();'), 8)
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 48)
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 52)
             self.assertEqual(first.count(b'/* ZELDA-WORLD-SPRITES-END */'), 12)
-            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin','ZeldaWorldLinkBegin','ZeldaWorldLinkEnd','ZeldaWorldSpawnBegin','ZeldaWorldSpawnEnd','ZeldaWorldHookshotBounds'):
+            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldMedallionBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin','ZeldaWorldLinkBegin','ZeldaWorldLinkEnd','ZeldaWorldSpawnBegin','ZeldaWorldSpawnEnd','ZeldaWorldHookshotBounds'):
                 self.assertEqual(first.count((hook + '();').encode()), 4)
             self.assertEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)
