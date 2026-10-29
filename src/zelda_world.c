@@ -941,6 +941,7 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x05e1a7||pc==0x05e1f0||pc==0x05e219||pc==0x05fa8e)ZeldaWorldInteractionBegin();
  if(pc==0x0799ad)ZeldaWorldItemReceiptBegin();
  if(pc==0x1bc8a4)ZeldaWorldSecretBegin();
+ if(pc==0x1bb860)ZeldaWorldPitBegin();
  if(pc==0x1bc939||pc==0x1bc942)ZeldaWorldSecretEnd();
  if(pc==0x0edd67)ZeldaWorldPegBegin();
  if(pc==0x1bc21d)ZeldaWorldWeathervaneBegin();
@@ -986,6 +987,14 @@ void ZeldaWorldProjectileCollisionEnd(void) {
 }
 void ZeldaWorldEntranceBegin(void) {
  if(playable()&&!RtlGuestScopeActive())use_area_collision(owner(rd16(0x8a)));
+}
+void ZeldaWorldPitBegin(void) {
+ if(!enabled||RtlGuestScopeActive()||g_ram[0x1b]||rd16(0x8a)>=ZW_OUTDOOR_AREAS)return;
+ /* Falling has already converted Link's Y to the original camera's entry
+  * row. The ROM hole table is indexed relative to its canonical area, not
+  * the stitched collision window that detected the pit. Native routing and
+  * the intentional fallback for an unknown hole remain authoritative. */
+ use_area_collision(owner(rd16(0x8a)));
 }
 void ZeldaWorldProjectileCollisionBegin(void) {
  if(RtlGuestScopeActive()||!live_projection||(!playable()&&!dungeon_playable()))return;

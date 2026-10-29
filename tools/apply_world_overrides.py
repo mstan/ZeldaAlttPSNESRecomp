@@ -9,6 +9,7 @@ from pathlib import Path
 MARK='/* ZELDA-WORLD-ACTOR-PROJECTION */'
 CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin','Bomb_CheckSpriteDamage':'ZeldaWorldBombDamageBegin','Ancilla_ExecuteOne':'ZeldaWorldAncillaBegin','Ancilla_CheckSpriteCollision':'ZeldaWorldProjectileCollisionBegin'}
 CALLS['Overworld_UseEntrance']='ZeldaWorldEntranceBegin'
+CALLS['Overworld_GetPitDestination']='ZeldaWorldPitBegin'
 CALLS['LinkOam_Main']='ZeldaWorldLinkBegin'
 CALLS['Ancilla_CheckInitialTile_A']='ZeldaWorldSpawnBegin'
 CALLS['Overworld_OperateCameraScroll']='ZeldaWorldSpawnEnd'

@@ -155,6 +155,24 @@ section.
    run the slower reference implementation.
 3. Rebuild as above.
 
+## Seamless World experiment
+
+Enable **Seamless World** in the launcher's **Mods** page. It is experimental
+and disabled by default. Use your stock USA ROM; no separate map data is needed.
+
+The camera shows live terrain and persistent native actors across Light/Dark
+World boundaries and connected dungeon floors. The mouse wheel changes zoom;
+**F4** toggles the whole current world or dungeon floor. The HUD stays anchored
+to the viewport. The original inventory and game map retain their own controls.
+Special entrances, stairs, pits and world changes retain native routing and
+animations. Rendering the whole map can slow down;60 FPS is not a requirement.
+
+This experiment is for local play. Native in-game saves remain separate from
+build-specific save states. Stock presentation, adaptive widescreen and MSU-1
+remain available. Representative gameplay, state and rendering checks are
+documented in [the burndown](docs/SEAMLESS-WORLD.md); this is not a full-game or
+netplay qualification.
+
 ## MSU-1 audio
 
 This build supports [MSU-1](https://sneslab.net/wiki/MSU1) — CD-quality

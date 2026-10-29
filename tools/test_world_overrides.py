@@ -9,6 +9,18 @@ SCRIPT = Path(__file__).with_name('apply_world_overrides.py')
 
 
 class WorldOverridesTest(unittest.TestCase):
+    def test_pit_native_entry_all_widths(self):
+        with tempfile.TemporaryDirectory(prefix='alttp-world-pits-') as directory:
+            root=Path(directory);target=root/'bank1b_test_v2.c'
+            target.write_text('\n'.join(f'RecompReturn Overworld_GetPitDestination_M{m}X{x}(CpuState *cpu) {{ original(); return 0; }}' for m in (0,1) for x in (0,1)))
+            def run(*args):
+                return subprocess.run([sys.executable,str(SCRIPT),'--gen-dir',str(root),*args],capture_output=True,text=True)
+            self.assertNotEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);first=target.read_bytes()
+            self.assertEqual(first.count(b'ZeldaWorldPitBegin();'),4)
+            self.assertEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);self.assertEqual(first,target.read_bytes())
+
     def test_dungeon_sampler_and_puzzle_native_returns(self):
         with tempfile.TemporaryDirectory(prefix='alttp-world-native-returns-') as directory:
             root=Path(directory);target=root/'bank06_test_v2.c'

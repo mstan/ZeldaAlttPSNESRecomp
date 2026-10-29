@@ -7,7 +7,7 @@ explicit deferred limits in `beads-2dw.18.4`.
 Worktrees, builds, profiles and raw evidence:
 `G:/Temp/Codex/alttp-seamless-20261027`. Original working copies are preserved.
 The owner authorized an experimental launcher release after the known
-implementation burndown; no release has been published yet.
+implementation burndown. The Windows candidate is `0.7.0-experimental.1`.
 
 ## Contract
 
@@ -37,14 +37,14 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | Milestone | Status | Evidence / next gate |
 |---|---|---|
 | 0. Frozen baseline | Built | Game `8eee8b6`, engine `68896b6`, UI `eaf99ca`; GCC 15.2 MinGW, SDL3, trace on. Baseline executable SHA256 `0d765132d7ce3c055e22a95ad51ed85774ec7d708e674dcfa668252b8e7b4d5d`. Verified identical generation inputs. |
-| 1. Isolated native calls | Initial gates passed | Success and forced interrupt-context/budget abort restore the serialized guest exactly, keep state generation, and leave bridge/host stack idle. Native decoder round trip passed. Main-thread-only entry; queued TCP mutations. Broader portability/side-effect qualification pending. |
-| 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
-| 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
-| 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Roaming activation, native seam walking and terrain collision have initial gates. Attached arrows retain target references across handoffs and extra pools. Native NPC/item receipts and global spell damage now have focused gates below. Authored secret indices, complete spell presentation and broader puzzle/inter-pool qualification remain open. |
-| 6. Connected dungeon floors | Initial implementation, qualification partial | Native floor-map membership with reciprocal-door fallback, original Map8/BG1/BG2 graphics, live resident actors and expanded door/plate animations. Eastern Palace native switch, room201->185, locked185->186/key consumption/reverse door, current-build save/load and replay pass. Actual stairs/other dungeons and complete lighting/effects remain unqualified. |
-| 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18 -> 19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
-| 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
+| 1. Isolated native calls | Windows x64 qualified | Success and forced abort restore serialized guest state exactly, preserve generation and leave the bridge idle. Original native loaders and AOT/LLE hooks share the same restoring scopes. |
+| 2. Real overworld atlas | Implemented; reference gates passed | All80 canonical Light/Dark areas decode, animate and match the native references. Original priority, subscreen/color math and palette flashes are composed. Retained and live story-phase roster refreshes pass focused checks. |
+| 3. Adaptive presentation | Implemented; viewport/UI gates passed | Independent Fit canvas, wheel zoom1..8 and F4 atlas; viewport HUD, inventory, dialogue, original map transitions, priority/transparency and ledge following. Software/OpenGL, paused resize and portrait checks pass. Earlier owner failures and their fixes remain recorded below. |
+| 4. Live overworld | Implemented; population gates passed | Visible areas plus512px halo tick, or the entire current world in atlas. Tested phase has281/281 Light and275/275 Dark authored spawns. Persistent additional pools, roaming terrain/activation and ordinary E/W/S/N crossings have native gameplay/replay checks. |
+| 5. Cross-area interactions | Implemented; representative gates passed | Sword/parry, native player damage/pickups, carried objects, arrows/bombs, other weapon families, all three medallions, NPC choices/payment/receipts, authored secrets and peg/fixed puzzles have focused gates. Full quest and enemy-variant coverage is not claimed. |
+| 6. Connected dungeon floors | Implemented; representative gates passed | Native floor membership, Map8/BG1/BG2/actors, ordinary and locked doors, pot/plate shutters, native153/1F->218/2F stairs, one live lamp cone and cross-room weapon hits. Full dungeon/boss coverage is not claimed. |
+| 7. Presentation and state | Current-build gates passed | Pointer-free v11 cache and strict preflight; exact moving, weapon, dialogue and medallion replays; disk save/load during inventory/carrying/weapons; Mirror/portal return; native enemy death and Continue. Native prologue text was skipped separately after Continue. |
+| 8. Qualification/handoff | Windows release candidate | Clean trace-off build and four CTests; six generated-hook tests; production/native-image checks, stock/adaptive/MSU fallback and archive audit. Prepared Pyramid/Village/Palace checkpoints preserve individual owner observations. Full-map60FPS and netplay are not gates. |
 
 Do not interpret implemented code, an atlas screenshot or an entrance load as
 a passed gameplay gate. Record failures and unverified content separately.
@@ -634,3 +634,47 @@ Five generated-hook tests and all four production CTests pass. QA binary:
 `0317b112a7c2b91adeef0f4c80affa2a292eac4770acc7fa8b2d7a45b4adbf06`.
 The clean Windows production build is trace-off, version0.7.0-experimental.1;
 release/archive and focused travel checks are still pending at this checkpoint.
+
+## Final native travel and Windows release checks (2026-10-28)
+
+`native-stair-floor-final-v3` follows the native153/1F->218/2F route and
+loads the upper floor's218/217/216/200 atlas. Forty frames replay exactly.
+The setup positions Link inside the enemy shutter; it does not claim clearing
+room153's enemies. Initial placements behind that shutter blocked identically
+with the feature off. The native5E/30 stair trigger determines the final
+approach, rather than a room/floor/result write.
+
+`native-death-continue-v3` uses original enemy contact to reach health0,
+native game over and native Continue. It returns the copied SRAM seed to
+Link's House, room260/module7/sub0, health80. That seed has not completed the
+prologue: its long telepathy text is skipped through the original text-finish
+state after Continue, separately from the health/room/routing result.
+
+`native-fixed-puzzle-final-v3` plays the original flute at the weathervane.
+After its native640-frame delay, the original event becomes32 and flute2->3.
+Inventory, position, ready item latch and initially clear event are explicit
+prerequisites; the upgrade and puzzle result are never forced.
+
+The final pit check exposed an actual routing defect: the Village well fell
+to fallback entrance130/room3. Falling first adjusts Link's Y relative to the
+native camera, then looks up an original canonical-area hole table. Stitched
+collision offsets caused that lookup to miss. The AOT and interpreter entries
+now select canonical area offsets for that original routine; its unknown-hole
+fallback remains native. `native-overworld-hole-final-v5` starts inside the
+exposed well, uses native falling/input and reaches entrance128/room47 with
+zero scoped failures. Earlier incorrect approach positions are retained as
+failed setup probes, not engine defects.
+
+Windows production is trace-off, version0.7.0-experimental.1. Runtime behavior
+and pixels are compared with the diagnostic build using the same saved scene,
+host, input and settings. Stock mode, adaptive widescreen and missing-pack MSU
+fallback retain their native state/presentation. Tests are muted and CPU-capped;
+their elapsed times are not60FPS or performance-win claims.
+
+This is a Windows x64 experimental release, with representative content gates,
+not an exhaustive playthrough of every quest, boss, carried enemy, reference
+between different actor pools, bomb throw through dungeon doors or lighting
+variant. Native Linux/macOS game builds and netplay are unqualified. A Steam
+Deck native unit-check attempt could not run because its installed environment
+has no C compiler; it is recorded as unavailable, not passed. Historical
+checkpoint sections above describe the state at those earlier commits.
