@@ -53,6 +53,7 @@ typedef struct WorldArea {
   uint32_t *raster;
   uint8_t *raster_priority;
   uint64_t ticks;
+  uint64_t raster_lamp;
   unsigned size;
   WorldPiece pieces[1024];
   unsigned piece_count;
@@ -114,6 +115,13 @@ static bool medallion_pending;
 static unsigned medallion_slot;
 typedef struct NativeSecretContext {bool active;uint16_t area,pos,stack;} NativeSecretContext;
 static NativeSecretContext secret_context;
+typedef struct NativePuzzleContext {
+ bool active,peg;uint16_t stack,area,pos;int x,y,world;unsigned extent;
+} NativePuzzleContext;
+static NativePuzzleContext puzzle_context;
+static bool dungeon_collision_rooms[ZD_ROOM_COUNT];
+typedef struct NativeDungeonSample {bool active;uint16_t stack,index;uint8_t original;} NativeDungeonSample;
+static NativeDungeonSample dungeon_sample;
 typedef struct ArrowTarget {uint16_t area;uint8_t pool,slot,type,valid;uint16_t spawn;} ArrowTarget;
 typedef struct NativeWeapon {uint8_t fields[38];} NativeWeapon;
 static ArrowTarget arrow_targets[5];
@@ -152,7 +160,12 @@ static bool prepare_actor_collision(const uint8_t *ram,int world);
 static bool run_terrain_scope(bool (*callback)(void *),void *context,unsigned budget,int world);
 static void select_interaction_context(void);
 static void restore_geographic_context(void);
+static bool adopt_area(unsigned id,bool crossing);
 static bool world_projectile(unsigned type);
+static int quake_background_y(void) {
+ for(unsigned k=0;k<10;k++)if(g_ram[0xc4a+k]==28)return (int16_t)(uint16_t)(g_ram[0x11c]|g_ram[0x11d]<<8);
+ return 0;
+}
 static bool other_projectile(unsigned type) {return type==1||type==2||type==5||type==11||type==12||type==31||type==44;}
 static uint64_t digest_bytes(const uint8_t*p,size_t n);
 typedef struct ReplayDigest {uint64_t all,core,world;size_t bytes;} ReplayDigest;
@@ -189,6 +202,14 @@ static uint16_t background_palette(const WorldArea*r,unsigned index) {
  if(!r->raster_flash)return r->palette[index];
  if(!index)return r->palette[0]?whiten_background(r->palette[32]):0;
  return index>=32&&index<128?whiten_background(r->palette[index]):r->palette[index];
+}
+static uint64_t lamp_projection(const WorldArea*r,int*dx,int*dy,int*qx,int*qy) {
+ if(!r->ram[0x1b]||!r->ram[0x458]||!r->ram[0xc005]||r->ram[0x45a])return 0;
+ *dx=(int16_t)(uint16_t)(rd16(0xe0)-rd16(0xe2));*dy=(int16_t)(uint16_t)(rd16(0xe6)-rd16(0xe8));
+ *qx=((rd16(0x22)+8+*dx)&511)>>8;*qy=((rd16(0x20)+12+*dy)&511)>>8;
+ bool live=g_ram[0x458]&&g_ram[0xc005]&&!g_ram[0x45a];
+ return (uint16_t)*dx|((uint64_t)(uint16_t)*dy<<16)|((uint64_t)*qx<<32)|((uint64_t)*qy<<33)|
+  (UINT64_C(1)<<34)|((uint64_t)live<<35);
 }
 static unsigned owner(unsigned id) {return id>=ZW_OUTDOOR_AREAS?id:heads[id&63]|(id&64);}
 static int area_x(unsigned id) {return id>=ZW_OUTDOOR_AREAS?((id-ZW_OUTDOOR_AREAS)&15)*512:(id&7)*512;}
@@ -236,7 +257,7 @@ static bool call(unsigned pc,unsigned p,unsigned a,unsigned x,unsigned y) {
    * stops when RTS/RTL returns past its entry, before executing the sentinel.
    * Widths are the original entry ABI, never inherited from another loader. */
   last_call=pc;
-  unsigned frame=pc==0x01b8bf||pc==0x00e19b||pc==0x00d394||pc==0x00d337||pc==0x02c630||pc==0x09c114||pc==0x0ed5a8||pc==0x09c499||pc==0x09c22f||pc==0x068328||pc==0x06ec5c||pc==0x0bfe70?3:2;
+  unsigned frame=pc==0x01b8bf||pc==0x00e19b||pc==0x00d394||pc==0x00d337||pc==0x02c630||pc==0x09c114||pc==0x0ed5a8||pc==0x09c499||pc==0x09c22f||pc==0x068328||pc==0x06ec5c||pc==0x0680fa||pc==0x0bfe70?3:2;
   g_cpu.S=(uint16_t)(0x1ff-frame);g_cpu.D=0;/* The dungeon drawer is bank-1 code reading bank-0 object/door tables
    * ($00:99C6, $00:9B52). Its original caller supplies DB=0. */
   g_cpu.DB=(uint8_t)((pc==0x02c57b||pc==0x01b8bf||pc==0x028aef||pc==0x09c114)?0:pc>>16);g_cpu.PB=(uint8_t)(pc>>16);
@@ -283,6 +304,7 @@ static unsigned dungeon_layer(const WorldArea*r,unsigned layer,int wx,int wy,uns
  return p;
 }
 static uint32_t background_math(const WorldArea*r,uint32_t rgb,unsigned layer,int wx,int wy) {
+ if(layer==4)wy+=quake_background_y();
  const WorldBackground*b=&r->background;
  if(!(b->math&(1u<<layer)))return rgb;
  unsigned other=b->fixed;bool half=(b->math&0x40)!=0;
@@ -291,7 +313,18 @@ static uint32_t background_math(const WorldArea*r,uint32_t rgb,unsigned layer,in
   if(r->ram[0x1b]) {
    unsigned best=0;
    for(unsigned layer=0;layer<2;layer++)if(b->sub&(1u<<layer)) {
-    unsigned rank=0,pixel=dungeon_layer(r,layer,wx,wy,&rank);
+    unsigned rank=0,pixel;int dx,dy,qx,qy;
+    uint64_t lamp=layer==0?lamp_projection(r,&dx,&dy,&qx,&qy):0;
+    if(lamp) {
+     /* BG1 stores four256px lamp orientations. Native scanout sees one;
+      * a whole-room/world canvas must not wrap into the other three or
+      * create another lamp in every cached room. Use the live mask once. */
+     if(!(lamp&(UINT64_C(1)<<35))||wx+dx<qx*256||wx+dx>=qx*256+256||
+        wy+dy<qy*256||wy+dy>=qy*256+256)continue;
+     WorldArea*live=native_area()<ZW_AREAS?areas[native_area()]:NULL;
+     if(!live)continue;
+     pixel=dungeon_layer(live,layer,wx,wy,&rank);
+    }else pixel=dungeon_layer(r,layer,wx,wy,&rank);
     if(rank>best){best=rank;p=pixel;}
    }
   }else if(b->sub&1) {
@@ -325,6 +358,8 @@ static uint32_t tile_pixel(const WorldArea *r,unsigned tile,unsigned x,unsigned 
 static void rasterize(unsigned id) {
  WorldArea *r=areas[id];if(!r)return;
  bool flash=native_background_flash();if(flash!=r->raster_flash){r->raster_flash=flash;r->dirty=true;}
+ int dx,dy,qx,qy;uint64_t lamp=lamp_projection(r,&dx,&dy,&qx,&qy);
+ if(lamp!=r->raster_lamp){r->raster_lamp=lamp;r->dirty=true;}
  if(!r->dirty)return;
  unsigned size=r->size;
  if(!r->raster)r->raster=malloc((size_t)size*size*4);
@@ -339,7 +374,7 @@ static void rasterize(unsigned id) {
    }
    size_t i=(size_t)y*512+x;
    r->raster_priority[i]=best?(best>=8?3:2):0;
-   r->raster[i]=background_math(r,color(background_palette(r,pixel)),selected,(int)x,(int)y);
+   r->raster[i]=background_math(r,color(background_palette(r,pixel)),selected,(int)x+area_x(id),(int)y+area_y(id));
   }
   r->dirty=false;return;
  }
@@ -623,6 +658,14 @@ static bool ensure(unsigned id) {
  }
  if(!areas[id])areas[id]=calloc(1,sizeof(WorldArea));
  WorldArea *r=areas[id];if(!r)return false;
+ bool refresh_live=false;
+ /* Story phases select different original map/actor rosters. A resident
+  * area must reload those native inputs when activated in the new phase,
+  * rather than retaining an earlier prologue/escape roster indefinitely. */
+ if(r->valid&&r->ram[0xf3c5]!=g_ram[0xf3c5]) {
+  refresh_live=!RtlGuestScopeActive()&&playable()&&native_area()==id;
+  free_pools(r);r->valid=r->populated=false;r->piece_count=0;
+ }
  if(r->valid)return true;
  r->size=area_size(id);PoolReserve reserve;Decode d={id,r,&reserve};
  uint64_t before=SDL_GetPerformanceCounter();
@@ -632,7 +675,7 @@ static bool ensure(unsigned id) {
  release_reserve(&reserve);
  if(!ok){free_pools(r);r->populated=false;}
  decode_ms+=(SDL_GetPerformanceCounter()-before)*1000.0/SDL_GetPerformanceFrequency();
- if(ok){r->valid=r->dirty=true;decoded++;}else failures++;
+ if(ok){r->valid=r->dirty=true;decoded++;if(refresh_live&&!adopt_area(id,false)){failures++;return false;}}else failures++;
  return ok;
 }
 static void collect_oam(WorldArea *r,WorldPiece*pieces,unsigned*count,int scroll_x,int scroll_y) {
@@ -742,7 +785,7 @@ void ZeldaWorldAncillaBegin(void) {
  wr16(0xe0,weapon_scroll_x);wr16(0xe2,weapon_scroll_x);wr16(0xe6,weapon_scroll_y);wr16(0xe8,weapon_scroll_y);
  wr16(0x11e,weapon_scroll_x);wr16(0x120,weapon_scroll_x);wr16(0x122,weapon_scroll_y);wr16(0x124,weapon_scroll_y);
  clear_projected_oam();
- if(playable()&&other_projectile(g_ram[0xc4a+k])) {
+ if((playable()||dungeon_playable())&&other_projectile(g_ram[0xc4a+k])) {
   memcpy(other_weapon_image[k],g_ram,sizeof g_ram);other_weapon_mask|=(uint16_t)(1u<<k);
  }
 }
@@ -828,6 +871,54 @@ void ZeldaWorldSecretEnd(void) {
  wr16(0x8a,secret_context.area);wr16(4,secret_context.pos);g_cpu.X=secret_context.pos;
  secret_context.active=false;
 }
+static void canonical_puzzle_begin(unsigned id,bool peg) {
+ if(RtlGuestScopeActive()&&sim_area){ZeldaWorldInteractionBegin();sim_event_requested=true;}
+ if(!playable()||!collision_window||puzzle_context.active||id>=ZW_OUTDOOR_AREAS||!areas[id])return;
+ puzzle_context=(NativePuzzleContext){true,peg,g_cpu.S,rd16(0x8a),g_cpu.X,collision_x,collision_y,collision_world,collision_extent};
+ int wx=collision_x+(int)((g_cpu.X&127)/2)*16,wy=collision_y+(int)(g_cpu.X/128)*16;
+ use_area_collision(id);wr16(0x8a,id);
+ if(peg)g_cpu.X=(uint16_t)(((wy-area_y(id))/16*64+(wx-area_x(id))/16)*2);
+}
+void ZeldaWorldPegBegin(void) {
+ if(!playable()||!collision_window||g_cpu.X>=8192||(g_cpu.X&1))return;
+ int x=collision_x+(int)((g_cpu.X&127)/2)*16,y=collision_y+(int)(g_cpu.X/128)*16;
+ unsigned id=owner(ZeldaWorldCell(x,y,(unsigned)collision_world));
+ if(id==7||id==98)canonical_puzzle_begin(id,true);
+}
+void ZeldaWorldWeathervaneBegin(void){canonical_puzzle_begin(24,false);}
+void ZeldaWorldGargoyleBegin(void){canonical_puzzle_begin(88,false);}
+void ZeldaWorldPyramidBegin(void){canonical_puzzle_begin(91,false);}
+void ZeldaWorldPuzzleEnd(void) {
+ if(!puzzle_context.active||g_cpu.S!=puzzle_context.stack)return;
+ NativePuzzleContext saved=puzzle_context;puzzle_context.active=false;
+ commit_collision();
+ if(saved.extent==64)use_world_collision(saved.x+512,saved.y+512,saved.world);
+ else use_area_collision(owner((unsigned)(saved.y/512*8+saved.x/512+saved.world)));
+ wr16(0x8a,saved.area);
+ if(saved.peg){g_cpu.X=saved.pos;wr16(4,saved.pos);}
+}
+void ZeldaWorldDungeonTileBegin(void) {
+ if(!dungeon_playable()||dungeon_sample.active||(!weapon_projection&&!replaying_weapon))return;
+ unsigned x=rd16(2),y=rd16(0),room=x<8192&&y<10240?(y/512)*16+x/512:ZD_ROOM_COUNT;
+ if(room==rd16(0x48e))return;
+ unsigned index=((y&0x1f8)<<3)+((x&0x1ff)>>3)+((g_cpu.A&255)>=1?0x1000:0);
+ WorldArea*r=room<ZD_ROOM_COUNT&&dungeon_collision_rooms[room]?areas[ZW_OUTDOOR_AREAS+room]:NULL;
+#if SNESRECOMP_TRACE
+ static unsigned traces;
+ if(traces++<32&&getenv("ZELDA_WORLD_TRACE_DUNGEON_TILES"))
+  fprintf(stderr,"World dungeon tile: x=%u y=%u floor=%u live=%u room=%u index=%u original=%u cached=%u member=%u\n",
+   x,y,g_cpu.A&255,rd16(0x48e),room,index,g_ram[0x12000+index],r&&r->valid?r->ram[0x12000+index]:1,room<ZD_ROOM_COUNT?dungeon_collision_rooms[room]:0);
+#endif
+ dungeon_sample=(NativeDungeonSample){true,g_cpu.S,(uint16_t)index,g_ram[0x12000+index]};
+ /* The native sampler masks coordinates to512px. Substitute only its one
+  * requested attribute, preserving the original floor/slope/collision code
+  * and restoring the active room before the next native operation. */
+ g_ram[0x12000+index]=r&&r->valid?r->ram[0x12000+index]:1;
+}
+void ZeldaWorldDungeonTileEnd(void) {
+ if(!dungeon_sample.active||g_cpu.S!=dungeon_sample.stack)return;
+ g_ram[0x12000+dungeon_sample.index]=dungeon_sample.original;dungeon_sample.active=false;
+}
 static void world_pc_hook(uint32_t pc,int m,int x) {
  if(previous_pc_hook)previous_pc_hook(pc,m,x);
  pc&=0x7fffff;
@@ -851,6 +942,13 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x0799ad)ZeldaWorldItemReceiptBegin();
  if(pc==0x1bc8a4)ZeldaWorldSecretBegin();
  if(pc==0x1bc939||pc==0x1bc942)ZeldaWorldSecretEnd();
+ if(pc==0x0edd67)ZeldaWorldPegBegin();
+ if(pc==0x1bc21d)ZeldaWorldWeathervaneBegin();
+ if(pc==0x1bc264)ZeldaWorldGargoyleBegin();
+ if(pc==0x1bc2a7)ZeldaWorldPyramidBegin();
+ if(pc==0x0eddb4||pc==0x0eddc3||pc==0x0eddfb||pc==0x1bc263||pc==0x1bc2a6||pc==0x1bc2f8)ZeldaWorldPuzzleEnd();
+ if(pc==0x06e886)ZeldaWorldDungeonTileBegin();
+ if(pc==0x06e8be||pc==0x06e8d5)ZeldaWorldDungeonTileEnd();
  if(pc==0x08833c)ZeldaWorldAncillaBegin();
  if(pc==0x08824c)ZeldaWorldAncillasEnd();
  if(pc==0x088d68)ZeldaWorldProjectileCollisionBegin();
@@ -890,7 +988,7 @@ void ZeldaWorldEntranceBegin(void) {
  if(playable()&&!RtlGuestScopeActive())use_area_collision(owner(rd16(0x8a)));
 }
 void ZeldaWorldProjectileCollisionBegin(void) {
- if(RtlGuestScopeActive()||!live_projection||!playable())return;
+ if(RtlGuestScopeActive()||!live_projection||(!playable()&&!dungeon_playable()))return;
  unsigned k=g_ram[0xfa0];if(k>=5||g_ram[0xc4a+k]!=9)return;
  /* This is the original arrow's exact post-movement collision phase. The
   * deferred pass does not move it, spend ammo or advance its timer again. */
@@ -898,7 +996,7 @@ void ZeldaWorldProjectileCollisionBegin(void) {
  arrow_collision_mask|=(uint16_t)(1u<<k);
 }
 void ZeldaWorldBombDamageBegin(void) {
- if(RtlGuestScopeActive()||!playable())return;
+ if(RtlGuestScopeActive()||(!playable()&&!dungeon_playable()))return;
  unsigned k=g_ram[0xfa0];if(k>=10||g_ram[0xc4a+k]!=7)return;
  /* Capture the exact native damage phase, before its fuse/animation changes.
   * Neighbor pools reuse only the enemy damage routine. The live bomb's
@@ -1071,7 +1169,6 @@ static bool weapon_transaction_scope(void*opaque) {
  return true;
 }
 static void other_weapon_collisions(unsigned id,WorldActorPool*pool) {
- if(id>=ZW_OUTDOOR_AREAS)return;
  uint8_t*actors=pool?pool->ram:areas[id]->ram;
  for(unsigned k=0;k<10;k++)if(other_weapon_mask&(1u<<k)) {
   const uint8_t*image=other_weapon_image[k];unsigned type=image[0xc4a+k];
@@ -1085,7 +1182,8 @@ static void other_weapon_collisions(unsigned id,WorldActorPool*pool) {
   }
   if(!near)continue;
   WeaponTransaction t={0};t.slot=k;t.actors=actors;
-  bool ok=RtlGuestScopeRun(weapon_transaction_scope,&t,1000000);replaying_weapon=false;
+  NativeDungeonSample saved_sample=dungeon_sample;
+  bool ok=RtlGuestScopeRun(weapon_transaction_scope,&t,1000000);replaying_weapon=false;dungeon_sample=saved_sample;
   if(!ok){failures++;continue;}
   if(!t.hit)continue;
   for(unsigned j=0;j<16;j++)write_actor(actors,j,&t.result[j]);
@@ -1100,6 +1198,7 @@ static bool medallion_scope(void *opaque) {
  for(unsigned k=0;k<16;k++){NativeActor a;read_actor(&a,t->actors,k);write_actor(g_ram,k,&a);}
  memcpy(g_ram+0x1f800,t->actors+0x1f800,0x800);
  if(!call(0x06ec5c,0x30,0,medallion_slot,0))return false;
+ if(medallion_image[0xc4a+medallion_slot]==28&&!call(0x0680fa,0x30,0,0,0))return false;
  for(unsigned k=0;k<16;k++)read_actor(&t->result[k],g_ram,k);
  memcpy(t->garnish,g_ram+0x1f800,0x800);memcpy(t->sfx,g_ram+0x12d,3);
  return true;
@@ -1131,7 +1230,9 @@ static void tick_pool(unsigned id,WorldActorPool*pool) {
  sim_area=areas[id];sim_pool=pool;sim_reward=false;
  memset(sim_interactive,0,sizeof sim_interactive);
  sim_event_requested=false;
+ NativeDungeonSample saved_sample=dungeon_sample;
  bool ok=id<ZW_OUTDOOR_AREAS?run_terrain_scope(tick_scope,&t,1000000,id&64):RtlGuestScopeRun(tick_scope,&t,1000000);
+ dungeon_sample=saved_sample;
  if(t.deferred)ok=true; /* intentional deferral discarded its terrain journal */
  if(ok)for(unsigned k=0;k<16;k++)if(sim_interactive[k])(pool?pool->interactive:areas[id]->interactive)[k]=sim_interactive[k];
  if(!ok)failures++;
@@ -1155,6 +1256,8 @@ void ZeldaWorldEnable(void){enabled=true;}
 void ZeldaWorldDisable(void){enabled=false;ZeldaWorldReset();}
 void ZeldaWorldReset(void) {
  secret_context.active=false;
+ puzzle_context.active=false;
+ dungeon_sample.active=false;memset(dungeon_collision_rooms,0,sizeof dungeon_collision_rooms);
  live_simulated_area=-1;interaction_context_changed=false;
  medallion_pending=false;
  spawn_view=false;replaying_weapon=false;other_weapon_mask=other_weapon_resolved=0;
@@ -1198,8 +1301,10 @@ static bool run_terrain_scope(bool (*callback)(void *),void *context,unsigned bu
  memcpy(saved.before,collision_before,sizeof saved.before);
  ZeldaWorldTerrainReset(&terrain_edits,(unsigned)world);active_terrain_edits=&terrain_edits;collision_window=false;
  NativeSecretContext saved_secret=secret_context;
+ NativePuzzleContext saved_puzzle=puzzle_context;
  bool ok=RtlGuestScopeRun(callback,context,budget);
  secret_context=saved_secret;
+ puzzle_context=saved_puzzle;
  active_terrain_edits=NULL;
  collision_window=saved.window;collision_x=saved.x;collision_y=saved.y;collision_world=saved.world;collision_extent=saved.extent;
  memcpy(collision_before,saved.before,sizeof collision_before);
@@ -1275,10 +1380,10 @@ static bool resident_actors_near(unsigned id,int left,int top,int right,int bott
  return false;
 }
 static bool projectile_near_area(unsigned id) {
- int ax=(id&7)*512,ay=((id&63)>>3)*512,size=(int)area_size(id);
+ int ax=area_x(id),ay=area_y(id),size=(int)area_size(id);
  for(unsigned k=0;k<10;k++)if(world_projectile(g_ram[0xc4a+k])) {
   int x=g_ram[0xc04+k]|g_ram[0xc18+k]<<8,y=g_ram[0xbfa+k]|g_ram[0xc0e + k]<<8;
-  if(x<ZW_WORLD&&y<ZW_WORLD&&x+64>=ax&&x-64<ax+size&&y+64>=ay&&y-64<ay+size)return true;
+  if(x+64>=ax&&x-64<ax+size&&y+64>=ay&&y-64<ay+size)return true;
  }
  return false;
 }
@@ -1292,7 +1397,15 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs) {
  other_weapon_mask=other_weapon_resolved=0;
  for(unsigned k=0;k<5;k++)if(g_ram[0xc4a+k]!=10)memset(&arrow_targets[k],0,sizeof arrow_targets[k]);
  collision_window=false;
- if(projected_dungeon()){collision_window=false;return true;}
+ if(projected_dungeon()){
+  collision_window=false;
+  if(dungeon_playable()) {
+   uint16_t rooms[ZD_ROOM_COUNT];unsigned n=dungeon_component(rd16(0xa0),rooms);
+   memset(dungeon_collision_rooms,0,sizeof dungeon_collision_rooms);
+   for(unsigned i=0;i<n;i++)if(ensure(ZW_OUTDOOR_AREAS+rooms[i]))dungeon_collision_rooms[rooms[i]]=true;
+  }
+  return true;
+ }
  if((overworld_inventory()||native_dialogue()||native_map_fade())&&active_world>=0) {
   /* The native menu still draws sprites, but pauses their gameplay through
    * its own submodule checks. Retain world projection for that draw pass. */
@@ -1460,7 +1573,7 @@ static void dungeon_frame_end(void) {
  uint64_t before=SDL_GetPerformanceCounter();
  for(unsigned i=0;i<n;i++) {
   unsigned next=ZW_OUTDOOR_AREAS+rooms[i];int ax=area_x(next),ay=area_y(next);
-  if(next!=id&&(atlas||(ax<x+w/2+512&&ax+512>x-w/2-512&&ay<y+h/2+512&&ay+512>y-h/2-512)))tick_area(next,true);
+  if(next!=id&&(atlas||projectile_near_area(next)||(ax<x+w/2+512&&ax+512>x-w/2-512&&ay<y+h/2+512&&ay+512>y-h/2-512)))tick_area(next,true);
  }
  simulation_ms=(SDL_GetPerformanceCounter()-before)*1000.0/SDL_GetPerformanceFrequency();
  service_commands();
@@ -1500,6 +1613,10 @@ void ZeldaWorldFrameEnd(void) {
   }
  }
  if(!playable()){
+  /* A native puzzle cutscene consumes canonical tile addresses on its next
+   * frame. Finish this frame's stitched edits before handing it that buffer. */
+  if(collision_window&&g_ram[0x10]==9&&last_area>=0&&owner(rd16(0x8a))==(unsigned)last_area)
+   use_area_collision((unsigned)last_area);
   collision_window=false;last_area=-1;
   /* The native loader has finished before the outdoor iris opens. Publish
    * that exterior now, rather than showing a 256px view until player control
@@ -1666,6 +1783,7 @@ static const uint32_t*dungeon_present(int dw,int dh,int*width,int*height) {
  memset(canvas_priority,0,count);
  for(unsigned i=0;i<n;i++) {
   unsigned id=ZW_OUTDOOR_AREAS+rooms[i];int ax=area_x(id),ay=area_y(id);
+  ay-=quake_background_y();
   int l=clamp(ax-camera_x,0,w),t=clamp(ay-camera_y,0,h),r=clamp(ax+512-camera_x,0,w),b=clamp(ay+512-camera_y,0,h);
   if(l>=r||t>=b||!ensure(id))continue;
   WorldArea*area=areas[id];animate_area(area);rasterize(id);if(!area->raster||!area->raster_priority)continue;
@@ -1709,6 +1827,7 @@ const uint32_t *ZeldaWorldPresent(const uint32_t *native,int native_pitch,
  for(unsigned id=(unsigned)active_world;id<(unsigned)active_world+64;id++) {
   if(owner(id)!=id)continue;
   int ax=(id&7)*512,ay=((id&63)>>3)*512,size=(int)area_size(id);
+  ay-=quake_background_y();
   int l=clamp(ax-camera_x,0,w),t=clamp(ay-camera_y,0,h);
   int rr=clamp(ax+size-camera_x,0,w),bb=clamp(ay+size-camera_y,0,h);
   if(l>=rr||t>=bb||!ensure(id))continue;
@@ -1963,6 +2082,12 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
    (unsigned long long)(r?digest_bytes(r->ram+0x4000,8192):0),
    (unsigned long long)(r?digest_bytes((const uint8_t*)r->vram,sizeof r->vram):0),
    (unsigned long long)(r?digest_bytes((const uint8_t*)r->palette,sizeof r->palette):0));
+  size_t end=strlen(line);
+  snprintf(line+end-1,sizeof line-end+1,",\"stairs\":[%u,%u,%u,%u]}",
+   r?(unsigned)(r->ram[0x6b0]|r->ram[0x6b1]<<8):0,
+   r?(unsigned)(r->ram[0x6b2]|r->ram[0x6b3]<<8):0,
+   r?(unsigned)(r->ram[0x6b4]|r->ram[0x6b5]<<8):0,
+   r?(unsigned)(r->ram[0x6b6]|r->ram[0x6b7]<<8):0);
   free(r);free(a);free(b);
  }else if(!strcmp(cmd,"world_area")) {
   unsigned id=0,page=0;if(sscanf(args,"%u %u",&id,&page)<1||id>=ZW_AREAS||!areas[owner(id)]){send("{\"error\":\"area not initialized\"}");return 1;}
@@ -2019,7 +2144,7 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   snprintf(line,sizeof line,"{\"ok\":true,\"assisted_inventory_selection\":%u}",item);
  }else if(!strcmp(cmd,"world_place_actor")) {
   unsigned id,k,x,y,dir=4,page=0;
-  if(sscanf(args,"%u %u %u %u %u %u",&id,&k,&x,&y,&dir,&page)<4||id>=128||k>=16||x>=4096||y>=4096||!ensure(id)) {
+  if(sscanf(args,"%u %u %u %u %u %u",&id,&k,&x,&y,&dir,&page)<4||id>=ZW_AREAS||k>=16||x>=(id<128?4096:8192)||y>=(id<128?4096:10240)||!ensure(id)) {
    send("{\"error\":\"need an initialized native actor and valid world coordinates\"}");return 1;
   }
   uint8_t*p=areas[owner(id)]->ram;
@@ -2030,7 +2155,7 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   if(!p[0xdd0+k]){send("{\"error\":\"actor slot is empty\"}");return 1;}
   p[0xd10+k]=(uint8_t)x;p[0xd30+k]=(uint8_t)(x>>8);p[0xd00+k]=(uint8_t)y;p[0xd20+k]=(uint8_t)(y>>8);
   if(dir<4)p[0xde0+k]=p[0xeb0+k]=(uint8_t)dir;
-  if(!page&&playable()&&owner(id)==owner(rd16(0x8a))) {
+  if(!page&&(playable()||dungeon_playable())&&owner(id)==native_area()) {
    g_ram[0xd10+k]=(uint8_t)x;g_ram[0xd30+k]=(uint8_t)(x>>8);g_ram[0xd00+k]=(uint8_t)y;g_ram[0xd20+k]=(uint8_t)(y>>8);
    if(dir<4)g_ram[0xde0+k]=g_ram[0xeb0+k]=(uint8_t)dir;
   }

@@ -586,3 +586,51 @@ regeneration-hook tests pass, including secret cleanup at RTS rather than yield.
 Tested SERVER binary14ad675dd2931a8f231eba128e5b2966e7b468682ceb938d276b63113f713b9c.
 Peg/hardcoded puzzle updates, dungeon projectile terrain/lighting and remaining
 travel/release gates are still open.
+
+## Native puzzles, dungeon weapons and lighting checkpoint (2026-10-28)
+
+Peg and fixed-location puzzles temporarily use their original canonical map
+buffer, then publish edits back to the stitched terrain at the native return.
+The three ordered Light World hammer pegs and all22 Dark World pegs pass actual
+Y-button sequences: native counters reach6 and22 respectively, and the original
+event bit is set. Position, equipment and initially clear prerequisites are
+assisted; the puzzle result is never written by the test. Weathervane,
+Gargoyle's Domain and Pyramid fixed tile updates use the same canonical context.
+Their complete quest sequences remain content qualification limits.
+
+Dungeon weapons sample the correct resident room's original collision byte
+instead of wrapping into Link's512px room. Sampling restores the live byte at
+the native hardware return, including scoped aborts. This substitution applies
+to weapons: applying it to native actor-coordinate callers broke an ordinary
+door route, and the frozen comparison isolated and corrected that regression.
+Native pot/plate201->185 travel, cross-door bow attachment and fire-rod impact
+pass again. Each weapon impact passes40-frame exact replay. A native bomb's
+fuse/explosion also damages the next room after assisting its position there;
+that test does not establish native bomb-throw movement through the door.
+
+Dark rooms now share one live native lamp mask. The512px BG1 map contains four
+orientations; the compositor previously repeated cones from the other three
+quadrants and neighboring rooms. An authored dark entrance/room240 test compares
+4912 lit pixels against native scanout (mean RGB channel difference3.80, with
+moving actors captured at different frames) and confirms the phantom cone is
+black. Native visible scanlines1..224 map to image rows0..223; the comparison
+accounts for that origin. Four direction captures and zero scoped failures are
+retained in `native-dungeon-lighting-v3`.
+
+Quake also runs the original enemy rumble routine and shifts world terrain by
+the native background offset. `native-quake-ground-render` observes both+3/-3
+offsets and95.49% matching aligned static-patch pixels. Native particle and
+animation differences remain in that patch. `native-medallion-rumble-quake`
+passes native guard transformation, freeze release and100-frame exact replay.
+
+Story-phase changes invalidate an area's native terrain/actor roster when it
+is next used. `native-story-cache-retained` matches fresh phase1 decodes after
+previous phase3 residency. `native-story-cache-live-v2` also verifies live-area
+replacement, preserves the unique live Mirror portal, and passes30-frame exact
+replay. These tests explicitly supply the phase as a prerequisite; they do not
+claim completion of the story event that changes it.
+
+Five generated-hook tests and all four production CTests pass. QA binary:
+`0317b112a7c2b91adeef0f4c80affa2a292eac4770acc7fa8b2d7a45b4adbf06`.
+The clean Windows production build is trace-off, version0.7.0-experimental.1;
+release/archive and focused travel checks are still pending at this checkpoint.

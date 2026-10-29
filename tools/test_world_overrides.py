@@ -9,6 +9,26 @@ SCRIPT = Path(__file__).with_name('apply_world_overrides.py')
 
 
 class WorldOverridesTest(unittest.TestCase):
+    def test_dungeon_sampler_and_puzzle_native_returns(self):
+        with tempfile.TemporaryDirectory(prefix='alttp-world-native-returns-') as directory:
+            root=Path(directory);target=root/'bank06_test_v2.c'
+            names=('bank_06_E886','HandlePegPuzzles','Overworld_AlterWeathervane','OpenGargoylesDomain','CreatePyramidHole')
+            target.write_text('\n'.join(
+                f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n'
+                '  if (yielding) { RecompStackPopYield(); return 1; }\n'
+                '  { uint16 _ret_s = cpu->S;  /* RTL pop hardware return frame */\n'
+                '    cpu->S += 3; RecompStackPop(); return 0; }\n}\n'
+                for name in names for m in (0,1) for x in (0,1)))
+            def run(*args):
+                return subprocess.run([sys.executable,str(SCRIPT),'--gen-dir',str(root),*args],capture_output=True,text=True)
+            self.assertNotEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);first=target.read_bytes()
+            self.assertEqual(first.count(b'ZeldaWorldDungeonTileBegin();'),4)
+            self.assertEqual(first.count(b'ZeldaWorldDungeonTileEnd();'),4)
+            self.assertEqual(first.count(b'ZeldaWorldPuzzleEnd();'),16)
+            self.assertEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);self.assertEqual(first,target.read_bytes())
+
     def test_secret_restores_at_native_return_not_yield(self):
         with tempfile.TemporaryDirectory(prefix='alttp-world-secrets-') as directory:
             root=Path(directory);target=root/'bank1b_test_v2.c'

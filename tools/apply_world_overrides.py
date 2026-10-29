@@ -16,6 +16,9 @@ CALLS['Hookshot_ShouldIEvenBotherWithTiles']='ZeldaWorldHookshotBounds'
 CALLS['Medallion_CheckSpriteDamage']='ZeldaWorldMedallionBegin'
 CALLS['Link_ReceiveItem']='ZeldaWorldItemReceiptBegin'
 CALLS['Overworld_RevealSecret']='ZeldaWorldSecretBegin'
+CALLS['bank_06_E886']='ZeldaWorldDungeonTileBegin'
+CALLS.update(HandlePegPuzzles='ZeldaWorldPegBegin',Overworld_AlterWeathervane='ZeldaWorldWeathervaneBegin',
+             OpenGargoylesDomain='ZeldaWorldGargoyleBegin',CreatePyramidHole='ZeldaWorldPyramidBegin')
 for name in ('Sprite_ShowSolicitedMessage','Sprite_ShowMessageOnContact',
              'Sprite_ShowMessageUnconditional','Sprite_ShowMessageMinimal'):
  CALLS[name]='ZeldaWorldInteractionBegin'
@@ -24,11 +27,14 @@ END_MARK='/* ZELDA-WORLD-SPRITES-END */'
 POP=re.compile(r'\bRecompStackPop(?:Yield)?\(\);')
 TOKENS=re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[{}]',re.S)
 RESULT_MARK='/* ZELDA-WORLD-WEAPON-RESULT */'
-RTS=re.compile(r'(?m)^[ ]*\{ uint16 _ret_s = cpu->S;  /\* RTS pop hardware return frame \*/')
+RTS=re.compile(r'(?m)^[ ]*\{ uint16 _ret_s = cpu->S;  /\* RT[SL] pop hardware return frame \*/')
 RESULTS={'Ancilla_CheckSpriteCollision','Ancilla_CheckSpriteCollision_Single',
          'Ancilla_CheckBasicSpriteCollision','Ancilla_CheckBasicSpriteCollision_Single'}
 RETURN_HOOKS={name:('/* ZELDA-WORLD-WEAPON-RESULT */','ZeldaWorldProjectileCollisionEnd') for name in RESULTS}
 RETURN_HOOKS['Overworld_RevealSecret']=('/* ZELDA-WORLD-SECRET-RESULT */','ZeldaWorldSecretEnd')
+RETURN_HOOKS['bank_06_E886']=('/* ZELDA-WORLD-DUNGEON-TILE-RESULT */','ZeldaWorldDungeonTileEnd')
+for name in ('HandlePegPuzzles','Overworld_AlterWeathervane','OpenGargoylesDomain','CreatePyramidHole'):
+ RETURN_HOOKS[name]=('/* ZELDA-WORLD-PUZZLE-RESULT */','ZeldaWorldPuzzleEnd')
 PATTERN=re.compile(r'RecompReturn ('+'|'.join(re.escape(n) for n in sorted(set(CALLS)|set(ENDS)|set(RETURN_HOOKS)))+r')_M[01]X[01]\(CpuState \*cpu\) \{')
 
 def body_end(text,start):
