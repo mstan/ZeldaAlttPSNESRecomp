@@ -94,6 +94,7 @@ static unsigned weapon_piece_count;
 static bool weapon_projection;
 static int weapon_scroll_x,weapon_scroll_y;
 static uint16_t weapon_adjusted_scroll[4];
+static uint16_t weapon_player_area,weapon_area_bound;
 static int projected_weapon=-1;
 static bool projected_arrow;
 static uint8_t weapon_oam_allocator[12],weapon_oam_pointer[4];
@@ -104,6 +105,14 @@ typedef struct NativeWeapon {uint8_t fields[38];} NativeWeapon;
 static ArrowTarget arrow_targets[5];
 static uint16_t arrow_collision_mask,arrow_resolved_mask;
 static uint8_t arrow_collision_image[5][0x1000];
+/* Repeat one original weapon transaction against a different native actor
+ * pool. Its pre-entry image includes the exact collision terrain window.
+ * Only its impact result is published; movement/timers run once live. */
+static uint8_t other_weapon_image[10][0x20000];
+static uint16_t other_weapon_mask,other_weapon_resolved;
+static bool replaying_weapon,replayed_weapon_hit;
+static bool spawn_view;
+static uint16_t spawn_scroll_x,spawn_scroll_y;
 static int sim_scroll_x,sim_scroll_y;
 static uint64_t actor_hooks;
 static bool held_transition_velocity;
@@ -126,6 +135,7 @@ static void commit_collision(void);
 static bool use_area_collision(unsigned id);
 static bool use_world_collision(int x,int y,int world);
 static bool world_projectile(unsigned type);
+static bool other_projectile(unsigned type) {return type==1||type==2||type==5||type==11||type==12||type==31||type==44;}
 static uint64_t digest_bytes(const uint8_t*p,size_t n);
 typedef struct ReplayDigest {uint64_t all,core,world;size_t bytes;} ReplayDigest;
 static struct {
@@ -636,8 +646,10 @@ void ZeldaWorldAncillaBegin(void) {
   memcpy(weapon_oam_allocator,g_ram+0xfe0,sizeof weapon_oam_allocator);
   memcpy(weapon_oam_pointer,g_ram+0x90,sizeof weapon_oam_pointer);
   for(unsigned i=0;i<4;i++)weapon_adjusted_scroll[i]=rd16(0x11e + i*2);
+  weapon_player_area=rd16(0x700);weapon_area_bound=rd16(0x716);
   weapon_projection=true;
  }
+ wr16(0x700,weapon_player_area);wr16(0x716,weapon_area_bound);
  unsigned k=g_ram[0xfa0];if(k>=10)return;
  projected_weapon=(int)k;projected_arrow=k<5&&g_ram[0xc4a+k]==9;
  if(k<5) {
@@ -660,6 +672,9 @@ void ZeldaWorldAncillaBegin(void) {
  wr16(0xe0,weapon_scroll_x);wr16(0xe2,weapon_scroll_x);wr16(0xe6,weapon_scroll_y);wr16(0xe8,weapon_scroll_y);
  wr16(0x11e,weapon_scroll_x);wr16(0x120,weapon_scroll_x);wr16(0x122,weapon_scroll_y);wr16(0x124,weapon_scroll_y);
  clear_projected_oam();
+ if(playable()&&other_projectile(g_ram[0xc4a+k])) {
+  memcpy(other_weapon_image[k],g_ram,sizeof g_ram);other_weapon_mask|=(uint16_t)(1u<<k);
+ }
 }
 void ZeldaWorldAncillasEnd(void) {
  if(!weapon_projection||RtlGuestScopeActive())return;
@@ -671,6 +686,7 @@ void ZeldaWorldAncillasEnd(void) {
  memcpy(g_ram+0xfe0,weapon_oam_allocator,sizeof weapon_oam_allocator);
  memcpy(g_ram+0x90,weapon_oam_pointer,sizeof weapon_oam_pointer);
  for(unsigned i=0;i<4;i++)wr16(0x11e + i*2,weapon_adjusted_scroll[i]);
+ wr16(0x700,weapon_player_area);wr16(0x716,weapon_area_bound);
  sim_scroll_x=live_scroll[1];sim_scroll_y=live_scroll[3];weapon_projection=false;
  if(playable()&&live_area<ZW_OUTDOOR_AREAS)use_area_collision(live_area);else collision_window=false;
 }
@@ -717,6 +733,9 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
   * Link's movable collision window. Restore that coordinate system after
   * Link_Main, before the original cave/door lookup and persistent writes. */
  if(pc==0x1bbbf4)ZeldaWorldEntranceBegin();
+ if(pc==0x099dd3)ZeldaWorldSpawnBegin();
+ if(pc==0x02bb90)ZeldaWorldSpawnEnd();
+ if(pc==0x08fa2d)ZeldaWorldHookshotBounds();
  if(pc==0x0684e2)ZeldaWorldActorBegin();
  if(pc==0x02a9c4)ZeldaWorldTransitionBegin();
  if(pc==0x068328)ZeldaWorldTransitionEnd();
@@ -726,6 +745,37 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x08833c)ZeldaWorldAncillaBegin();
  if(pc==0x08824c)ZeldaWorldAncillasEnd();
  if(pc==0x088d68)ZeldaWorldProjectileCollisionBegin();
+ if(pc==0x088da1||pc==0x088ddd||pc==0x088dea||pc==0x088e72||pc==0x088e74||
+    pc==0x08e23c||pc==0x08e2c7||pc==0x08e2c9)ZeldaWorldProjectileCollisionEnd();
+}
+void ZeldaWorldSpawnBegin(void) {
+ if(spawn_view||live_projection||RtlGuestScopeActive()||!playable())return;
+ /* The ice rod rejects a newly created shot outside the native viewport.
+  * Center that creation view on Link, then restore before the real camera
+  * operates. Collision still uses the stitched native terrain window. */
+ spawn_scroll_x=rd16(0xe2);spawn_scroll_y=rd16(0xe8);spawn_view=true;
+ wr16(0xe2,rd16(0x22)-128);wr16(0xe8,rd16(0x20)-112);
+}
+void ZeldaWorldSpawnEnd(void) {
+ if(!spawn_view||RtlGuestScopeActive())return;
+ wr16(0xe2,spawn_scroll_x);wr16(0xe8,spawn_scroll_y);spawn_view=false;
+}
+void ZeldaWorldHookshotBounds(void) {
+ if(!playable()||(!replaying_weapon&&!weapon_projection))return;
+ unsigned k=g_ram[0xfa0];if(k>=10||g_ram[0xc4a+k]!=31)return;
+ unsigned x=g_ram[0xc04+k]|g_ram[0xc18+k]<<8,y=g_ram[0xbfa+k]|g_ram[0xc0e + k]<<8;
+ if(x>=ZW_WORLD||y>=ZW_WORLD)return;
+ unsigned cell=(y/512)*8+x/512;
+ /* The original hookshot compares its post-movement tip to a ROM area
+  * origin, independently of its tile collision window. Select that tip's
+  * native area for this weapon only; Link's routing fields are restored. */
+ wr16(0x700,cell*2);wr16(0x716,area_size(owner(cell))-16);
+}
+void ZeldaWorldProjectileCollisionEnd(void) {
+ if(!(g_cpu.P&1))return;
+ if(RtlGuestScopeActive()) {if(replaying_weapon)replayed_weapon_hit=true;return;}
+ unsigned k=g_ram[0xfa0];
+ if(k<10&&(other_weapon_mask&(1u<<k)))other_weapon_resolved|=(uint16_t)(1u<<k);
 }
 void ZeldaWorldEntranceBegin(void) {
  if(playable()&&!RtlGuestScopeActive())use_area_collision(owner(rd16(0x8a)));
@@ -877,8 +927,52 @@ static bool tick_scope(void *opaque) {
  if(t->pool)t->pool->ticks++;else r->ticks++;
  return true;
 }
+typedef struct WeaponTransaction {
+ unsigned slot;uint8_t *actors;NativeActor result[16];NativeWeapon weapon;
+ uint8_t garnish[0x800],sfx[3];bool hit;
+} WeaponTransaction;
+static bool weapon_transaction_scope(void*opaque) {
+ WeaponTransaction*t=opaque;const uint8_t*image=other_weapon_image[t->slot];
+ memcpy(g_ram,image,sizeof g_ram);
+ for(unsigned k=0;k<16;k++){NativeActor actor;read_actor(&actor,t->actors,k);write_actor(g_ram,k,&actor);}
+ memcpy(g_ram+0x1f800,t->actors+0x1f800,0x800);
+ g_ram[0xfa0]=(uint8_t)t->slot;replaying_weapon=true;replayed_weapon_hit=false;
+ if(!call(0x08833c,0x30,image[0xc4a+t->slot],t->slot,0))return false;
+ t->hit=replayed_weapon_hit;
+ if(t->hit) {
+  for(unsigned k=0;k<16;k++)read_actor(&t->result[k],g_ram,k);
+  read_weapon(&t->weapon,g_ram,t->slot);memcpy(t->garnish,g_ram+0x1f800,0x800);
+  memcpy(t->sfx,g_ram+0x12d,3);
+ }
+ return true;
+}
+static void other_weapon_collisions(unsigned id,WorldActorPool*pool) {
+ if(id>=ZW_OUTDOOR_AREAS)return;
+ uint8_t*actors=pool?pool->ram:areas[id]->ram;
+ for(unsigned k=0;k<10;k++)if(other_weapon_mask&(1u<<k)) {
+  const uint8_t*image=other_weapon_image[k];unsigned type=image[0xc4a+k];
+  bool sustained=(type==2&&image[0xc54+k])||type==44;
+  if(!sustained&&(other_weapon_resolved&(1u<<k)))continue;
+  int x=image[0xc04+k]|image[0xc18+k]<<8,y=image[0xbfa+k]|image[0xc0e + k]<<8;
+  bool near=false;
+  for(unsigned j=0;j<16;j++)if(actors[0xdd0+j]>=9) {
+   int ax=actors[0xd10+j]|actors[0xd30+j]<<8,ay=actors[0xd00+j]|actors[0xd20+j]<<8;
+   if(abs(ax-x)<160&&abs(ay-y)<160){near=true;break;}
+  }
+  if(!near)continue;
+  WeaponTransaction t={0};t.slot=k;t.actors=actors;
+  bool ok=RtlGuestScopeRun(weapon_transaction_scope,&t,1000000);replaying_weapon=false;
+  if(!ok){failures++;continue;}
+  if(!t.hit)continue;
+  for(unsigned j=0;j<16;j++)write_actor(actors,j,&t.result[j]);
+  memcpy(actors+0x1f800,t.garnish,0x800);write_weapon(g_ram,k,&t.weapon);
+  for(unsigned j=0;j<3;j++)if(t.sfx[j]!=image[0x12d+j])g_ram[0x12d+j]=t.sfx[j];
+  if(!sustained)other_weapon_resolved|=(uint16_t)(1u<<k);
+ }
+}
 static void tick_pool(unsigned id,WorldActorPool*pool) {
  if(!ensure(id))return;
+ other_weapon_collisions(id,pool);
  Tick t={0};t.id=id;t.pool=pool;t.player_x=rd16(0x22);t.player_y=rd16(0x20);t.frame=g_ram[0x1a];t.player_floor=g_ram[0xee];
  memcpy(t.player,g_ram+0x20,sizeof t.player);memcpy(t.progress,g_ram+0xf000,sizeof t.progress);
  memcpy(t.action,g_ram+0x2d0,sizeof t.action);
@@ -911,6 +1005,7 @@ bool ZeldaWorldEnabled(void){return enabled;}
 void ZeldaWorldEnable(void){enabled=true;}
 void ZeldaWorldDisable(void){enabled=false;ZeldaWorldReset();}
 void ZeldaWorldReset(void) {
+ spawn_view=false;replaying_weapon=false;other_weapon_mask=other_weapon_resolved=0;
  for(unsigned i=0;i<ZW_AREAS;i++){if(areas[i]){free_pools(areas[i]);free(areas[i]->raster);free(areas[i]->raster_priority);free(areas[i]);areas[i]=NULL;}}
  active_world=-1;decoded=failures=0;decode_ms=0;
  collision_window=false;last_area=-1;handoffs=0;
@@ -971,7 +1066,7 @@ static bool use_area_collision(unsigned id) {
  collision_window=true;return true;
 }
 static bool world_projectile(unsigned type) {
- return type==1||type==2||type==5||type==7||type==9||type==11||type==31;
+ return type==7||type==9||other_projectile(type);
 }
 static bool projectile_near_area(unsigned id) {
  int ax=(id&7)*512,ay=((id&63)>>3)*512,size=(int)area_size(id);
@@ -986,6 +1081,7 @@ bool ZeldaWorldFrameBegin(uint32_t *inputs) {
  link_projected=false;
  bomb_damage_mask=0;
  arrow_collision_mask=arrow_resolved_mask=0;
+ other_weapon_mask=other_weapon_resolved=0;
  for(unsigned k=0;k<5;k++)if(g_ram[0xc4a+k]!=10)memset(&arrow_targets[k],0,sizeof arrow_targets[k]);
  collision_window=false;
  if(projected_dungeon()){collision_window=false;return true;}
@@ -1103,6 +1199,7 @@ static void dungeon_frame_end(void) {
  service_commands();
 }
 void ZeldaWorldFrameEnd(void) {
+ ZeldaWorldSpawnEnd();
  ZeldaWorldSpritesEnd();
  if(held_transition_velocity){g_ram[0x30]=held_vy;g_ram[0x31]=held_vx;held_transition_velocity=false;}
  /* Module09 draws Link AFTER Sprite_Main, using the restored native camera.
@@ -1564,7 +1661,7 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   uint8_t*ar=page?pool->ram:r->ram;uint64_t ticks=page?pool->ticks:r->ticks;
   int n=snprintf(line,sizeof line,"{\"id\":%u,\"pool\":%u,\"pools\":%u,\"ticks\":%llu,\"authored_spawns\":%u,\"loaded_spawns\":%u,\"actors\":[",owner(id),page,1+pool_count(r),(unsigned long long)ticks,authored,loaded);bool first=true;
   for(unsigned k=0;k<16;k++)if(ar[0xdd0+k]) {
-   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u}",first?"":",",k,ar[0xe20+k],ar[0xdd0+k],ar[0xd10+k]|ar[0xd30+k]<<8,ar[0xd00+k]|ar[0xd20+k]<<8,ar[0xdf0+k],ar[0xe50+k],ar[0xef0+k],ar[0xce2+k],ar[0xdb0+k],ar[0xde0+k]);first=false;
+   n+=snprintf(line+n,sizeof line-(size_t)n,"%s{\"slot\":%u,\"type\":%u,\"state\":%u,\"x\":%u,\"y\":%u,\"timer\":%u,\"health\":%u,\"hit_timer\":%u,\"pending_damage\":%u,\"C\":%u,\"direction\":%u,\"weapon_hit\":%u,\"B\":%u,\"stun\":%u}",first?"":",",k,ar[0xe20+k],ar[0xdd0+k],ar[0xd10+k]|ar[0xd30+k]<<8,ar[0xd00+k]|ar[0xd20+k]<<8,ar[0xdf0+k],ar[0xe50+k],ar[0xef0+k],ar[0xce2+k],ar[0xdb0+k],ar[0xde0+k],ar[0xbb0+k],ar[0xda0+k],ar[0xb58+k]);first=false;
   }
   snprintf(line+n,sizeof line-(size_t)n,"]}");
  }else if(!strcmp(cmd,"world_qa_position")) {
@@ -1599,11 +1696,13 @@ static int command(const char *cmd,const char *args,DebugServerGameSendLine send
   areas[owner(id)]->ram[0xe90+k]=0;
   snprintf(line,sizeof line,"{\"ok\":true,\"bypassed_hidden_pickup_prerequisite\":true}");
  }else if(!strcmp(cmd,"world_qa_item")) {
-  unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"hookshot")?10:!strcmp(args,"mirror")?20:0;
-  if(!item){send("{\"error\":\"use bombs, boomerang, bow, hookshot or mirror\"}");return 1;}
+  unsigned item=!strcmp(args,"bombs")?1:!strcmp(args,"boomerang")?2:!strcmp(args,"bow")?3:!strcmp(args,"firerod")?5:!strcmp(args,"icerod")?6:!strcmp(args,"hookshot")?14:!strcmp(args,"somaria")?18:!strcmp(args,"mirror")?20:0;
+  if(!item){send("{\"error\":\"use bombs, boomerang, bow, firerod, icerod, hookshot, somaria or mirror\"}");return 1;}
   g_ram[0x303]=g_ram[0x304]=(uint8_t)item;
   g_ram[0xf340]=2;g_ram[0xf341]=g_ram[0xf342]=1;g_ram[0xf343]=10;g_ram[0xf377]=50;
   if(item==20)g_ram[0xf353]=2;
+  if(item==5||item==6||item==18){g_ram[0xf345]=g_ram[0xf346]=g_ram[0xf350]=1;g_ram[0xf36e]=0x80;}
+  if(item==14)g_ram[0xf342]=1;
   snprintf(line,sizeof line,"{\"ok\":true,\"assisted_inventory_selection\":%u}",item);
  }else if(!strcmp(cmd,"world_place_actor")) {
   unsigned id,k,x,y,dir=4,page=0;

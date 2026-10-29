@@ -41,7 +41,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword hit/parry, enemy-to-Link damage, bomb and arrow damage, and ordinary pickup reward publication demonstrated across an edge. Attached arrows retain native target references across handoffs and into additional actor pools. Global ancillas survive a handoff and project outside the old viewport. Other projectile collisions/lifetime, enemy migration, authored secret indices, puzzle/NPC progression and broader inter-pool interactions remain open. |
+| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Attached arrows retain target references across handoffs and extra pools. Global spells, roaming terrain/activation, authored secret indices, puzzle/NPC progression and broader inter-pool qualification remain open. |
 | 6. Connected dungeon floors | Initial implementation, qualification partial | Native floor-map membership with reciprocal-door fallback, original Map8/BG1/BG2 graphics, live resident actors and expanded door/plate animations. Eastern Palace native switch, room201->185, locked185->186/key consumption/reverse door, current-build save/load and replay pass. Actual stairs/other dungeons and complete lighting/effects remain unqualified. |
 | 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18 -> 19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
@@ -421,8 +421,7 @@ remaining dungeon effects still need qualification. Current-build room records
 are pointer-free and validated in schema v10; earlier experiment states are
 disposable. Native SRAM is preserved.
 
-Known implementation work still includes the other weapon collision types,
-roaming actors' terrain and
+Known implementation work still includes global spell coverage, roaming actors' terrain and
 activation, inter-pool NPC interaction/secret progression, and remaining
 interfaces/lighting/windows. This floor checkpoint does not close the full
 burndown and is not a release claim. Whole-map60 FPS remains optional.
@@ -442,3 +441,47 @@ cached held clones, and native A-button throw/break. Only player position and
 equipment were assisted; the lift/carry/throw handlers were not forced. The
 existing actual Mirror/portal seam round trip still passes after this change.
 Other carried enemy types and dungeon carry routing remain unqualified.
+
+## Other projectile checkpoint (2026-10-28)
+
+Neighbor pools now reuse the original complete weapon handler from its exact
+pre-entry image in a restoring guest scope. Native collision RTS results decide
+whether to publish the impact's actor, weapon, garnish and sound changes. The
+real weapon advances movement, timers and inventory once. Fire bursts can
+affect multiple pools; a traveling shot resolves one impact. Arrow attachment
+and bomb explosion handling retain their existing native paths.
+
+Two additional original bounds checks needed correction. The ice rod rejected
+shots spawned beyond the old screen; its creation view now centers on Link
+until the real camera runs. The hookshot skipped collision beyond Link's old
+area; its original check now uses the post-movement tip's area, with Link's
+routing fields restored at the weapon boundary. AOT and interpreter paths use
+the same hooks. Generator tests cover all width variants, actual hardware
+returns, yield exclusion, idempotence and stale instrumentation detection.
+
+Muted native-input gates, with explicit equipment/position/facing assists:
+
+- `native-family-v2-boomerang`: red boomerang stuns the neighboring guard.
+  The earlier blue-boomerang setup missed the retreating target; it is not a
+  passing impact check.
+- `native-family-v3-icerod`: the shot spawns across the old screen edge and
+  the target enters native state6/health254 before disappearing. A later guard
+  probe reuses that slot; it is not the original target surviving the hit.
+- `native-family-v5-hookshot`: neighboring guard enters state11, weapon-hit31
+  and stun226; the chain retracts.
+- `native-family-v5-beam`: native weapon-hit12 and health6->4.
+- `native-family-v5-somaria`: normal Y-button block creation/burst, native
+  weapon-hit1 and health6->4.
+- `native-family-v5-firerod`: native weapon-hit2 and fire-death state7.
+
+Each gate passes a60-frame byte-exact replay with zero scoped failures. Raw
+results, per-build identities and capacity receipts are retained in the task
+evidence. `native-family-extra-state` also validates a fire impact in area27's
+additional actor pool, current-build mid-flight save/load, two40-frame exact
+replays, and exact success/forced-abort guest-scope restoration. This QA job
+caps its own process tree to one CPU to fit available shared-host capacity;
+its frame costs are not a performance claim.
+
+Current record layout remains v10. Global spells, dungeon projectile
+travel, broader enemy/item variants and the remaining progression/effect work
+are not claimed complete. No release has been published.

@@ -6,15 +6,22 @@ instructions or return-frame contracts are replaced by this instrumentation.
 """
 import argparse,re
 from pathlib import Path
-PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main|Ancilla_CheckSpriteCollision|Overworld_UseEntrance|LinkOam_Main)_M[01]X[01]\(CpuState \*cpu\) \{')
+PATTERN=re.compile(r'RecompReturn (Sprite_ExecuteSingle|OverworldHandleTransitions|Sprite_Main|Sprite_HandleAbsorptionByPlayer|Bomb_CheckSpriteDamage|Ancilla_ExecuteOne|Ancilla_Main|Ancilla_CheckSpriteCollision(?:_Single)?|Ancilla_CheckBasicSpriteCollision(?:_Single)?|Ancilla_CheckInitialTile_A|Hookshot_ShouldIEvenBotherWithTiles|Overworld_OperateCameraScroll|Overworld_UseEntrance|LinkOam_Main)_M[01]X[01]\(CpuState \*cpu\) \{')
 MARK='/* ZELDA-WORLD-ACTOR-PROJECTION */'
 CALLS={'Sprite_ExecuteSingle':'ZeldaWorldActorBegin','OverworldHandleTransitions':'ZeldaWorldTransitionBegin','Sprite_Main':'ZeldaWorldTransitionEnd','Sprite_HandleAbsorptionByPlayer':'ZeldaWorldRewardBegin','Bomb_CheckSpriteDamage':'ZeldaWorldBombDamageBegin','Ancilla_ExecuteOne':'ZeldaWorldAncillaBegin','Ancilla_CheckSpriteCollision':'ZeldaWorldProjectileCollisionBegin'}
 CALLS['Overworld_UseEntrance']='ZeldaWorldEntranceBegin'
 CALLS['LinkOam_Main']='ZeldaWorldLinkBegin'
+CALLS['Ancilla_CheckInitialTile_A']='ZeldaWorldSpawnBegin'
+CALLS['Overworld_OperateCameraScroll']='ZeldaWorldSpawnEnd'
+CALLS['Hookshot_ShouldIEvenBotherWithTiles']='ZeldaWorldHookshotBounds'
 ENDS={'Sprite_Main':'ZeldaWorldSpritesEnd','Ancilla_Main':'ZeldaWorldAncillasEnd','LinkOam_Main':'ZeldaWorldLinkEnd'}
 END_MARK='/* ZELDA-WORLD-SPRITES-END */'
 POP=re.compile(r'\bRecompStackPop(?:Yield)?\(\);')
 TOKENS=re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[{}]',re.S)
+RESULT_MARK='/* ZELDA-WORLD-WEAPON-RESULT */'
+RTS=re.compile(r'(?m)^[ ]*\{ uint16 _ret_s = cpu->S;  /\* RTS pop hardware return frame \*/')
+RESULTS={'Ancilla_CheckSpriteCollision','Ancilla_CheckSpriteCollision_Single',
+         'Ancilla_CheckBasicSpriteCollision','Ancilla_CheckBasicSpriteCollision_Single'}
 
 def body_end(text,start):
  depth=1
@@ -27,11 +34,17 @@ def body_end(text,start):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--gen-dir',type=Path,default=Path('src/gen'));p.add_argument('--check',action='store_true');a=p.parse_args()
  count=changed=0
- paths=set(a.gen_dir.glob('bank0[268d]*_v2.c'))|set(a.gen_dir.glob('bank1b*_v2.c'))
+ paths=set(a.gen_dir.glob('bank0[2689d]*_v2.c'))|set(a.gen_dir.glob('bank1b*_v2.c'))
  for path in sorted(paths):
   text=path.read_text(encoding='utf-8');matches=list(PATTERN.finditer(text));count+=len(matches)
   for match in reversed(matches):
    end=body_end(text,match.end());body=text[match.end():end]
+   if match.group(1) in RESULTS:
+    returns=len(RTS.findall(body));results=body.count(RESULT_MARK)
+    if results!=returns:
+     if results:raise SystemExit(f'partial world weapon result: {path}')
+     if a.check:raise SystemExit(f'missing world weapon result: {path}')
+     body=RTS.sub(lambda m:RESULT_MARK+'\n  { extern void ZeldaWorldProjectileCollisionEnd(void); ZeldaWorldProjectileCollisionEnd(); }\n'+m.group(),body);changed+=returns
    if match.group(1) in ENDS:
     pops=len(POP.findall(body));ends=body.count(END_MARK)
     if ends!=pops:

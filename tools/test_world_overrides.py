@@ -15,7 +15,7 @@ class WorldOverridesTest(unittest.TestCase):
             source = '\n'.join(
                 f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n  '+
                 ('RecompStackPop();\n  ' if name in ('Sprite_Main','Ancilla_Main','LinkOam_Main') else '')+'return 0;\n}'
-                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'LinkOam_Main', 'Unrelated')
+                for name in ('Sprite_ExecuteSingle', 'OverworldHandleTransitions', 'Sprite_Main', 'Sprite_HandleAbsorptionByPlayer', 'Bomb_CheckSpriteDamage', 'Ancilla_ExecuteOne', 'Ancilla_Main', 'Ancilla_CheckSpriteCollision', 'Overworld_UseEntrance', 'LinkOam_Main', 'Ancilla_CheckInitialTile_A', 'Overworld_OperateCameraScroll', 'Hookshot_ShouldIEvenBotherWithTiles', 'Unrelated')
                 for m in (0, 1) for x in (0, 1)
             )
             target = root / 'bank06_test_v2.c'
@@ -40,14 +40,38 @@ class WorldOverridesTest(unittest.TestCase):
             self.assertEqual(entrances.read_bytes().count(b'ZeldaWorldEntranceBegin();'), 4)
             self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkBegin();'), 4)
             self.assertEqual(player.read_bytes().count(b'ZeldaWorldLinkEnd();'), 8)
-            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 36)
+            self.assertEqual(first.count(b'/* ZELDA-WORLD-ACTOR-PROJECTION */'), 48)
             self.assertEqual(first.count(b'/* ZELDA-WORLD-SPRITES-END */'), 12)
-            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin','ZeldaWorldLinkBegin','ZeldaWorldLinkEnd'):
+            for hook in ('ZeldaWorldActorBegin', 'ZeldaWorldTransitionBegin', 'ZeldaWorldTransitionEnd', 'ZeldaWorldRewardBegin', 'ZeldaWorldBombDamageBegin', 'ZeldaWorldAncillaBegin','ZeldaWorldAncillasEnd','ZeldaWorldProjectileCollisionBegin','ZeldaWorldEntranceBegin','ZeldaWorldLinkBegin','ZeldaWorldLinkEnd','ZeldaWorldSpawnBegin','ZeldaWorldSpawnEnd','ZeldaWorldHookshotBounds'):
                 self.assertEqual(first.count((hook + '();').encode()), 4)
             self.assertEqual(run('--check').returncode, 0)
             self.assertEqual(run().returncode, 0)
             self.assertEqual(first, target.read_bytes())
             self.assertIn(b'Unrelated_M0X0(CpuState *cpu) {\n  return 0;', first)
+
+    def test_collision_result_at_hardware_return_only(self):
+        with tempfile.TemporaryDirectory(prefix='alttp-world-results-') as directory:
+            root = Path(directory)
+            target = root / 'bank08_test_v2.c'
+            names = ('Ancilla_CheckSpriteCollision', 'Ancilla_CheckSpriteCollision_Single',
+                     'Ancilla_CheckBasicSpriteCollision', 'Ancilla_CheckBasicSpriteCollision_Single')
+            target.write_text('\n'.join(
+                f'RecompReturn {name}_M{m}X{x}(CpuState *cpu) {{\n'
+                '  if (yielding) { RecompStackPopYield(); return 1; }\n'
+                '  { uint16 _ret_s = cpu->S;  /* RTS pop hardware return frame */\n'
+                '    cpu->S += 2; RecompStackPop(); return 0; }\n}\n'
+                for name in names for m in (0, 1) for x in (0, 1)))
+            def run(*args):
+                return subprocess.run([sys.executable, str(SCRIPT), '--gen-dir', str(root), *args],
+                                      capture_output=True, text=True)
+            self.assertNotEqual(run('--check').returncode, 0)
+            self.assertEqual(run().returncode, 0)
+            first = target.read_bytes()
+            self.assertEqual(first.count(b'ZeldaWorldProjectileCollisionEnd();'), 16)
+            self.assertNotIn(b'ZeldaWorldProjectileCollisionEnd(); }\n  if (yielding)', first)
+            self.assertEqual(run('--check').returncode, 0)
+            self.assertEqual(run().returncode, 0)
+            self.assertEqual(first, target.read_bytes())
 
 
 if __name__ == '__main__':
