@@ -41,7 +41,7 @@ correctness regressions; do not gate the atlas on maintaining 60 FPS.
 | 2. Real overworld atlas | Partial | All 40 canonical areas in each Light/Dark World decode into separate 4096x4096 maps. Native tile/gfx/palette loaders, cached Map16 rasters. Layer priority, overlays, progression variants and native visual equality still open. |
 | 3. Adaptive presentation | Partial | Independent width/height canvas, mouse zoom 1..8, consumed F4 atlas shortcut, native OAM projected into world space and native transparent HUD anchored to the actual viewport. The current atlas is 4096x4096, without a reserved HUD strip. Earlier 4096x4128 captures are historical. Follow, atlas, paused zoom, portrait and inventory overlay captures retained. Paused redraw keeps the native image frozen; frame counter and sampled RAM stay unchanged, then host resume advances again. Menu/effect and complete layer composition pending. |
 | 4. Live overworld preview | Initial gates passed | Native Sprite_Main ticks visible areas plus 512px halo, or all current-world areas in atlas. Additional native pools activate 281/281 authored Light World and 275/275 Dark World spawns in the tested progression phase. Inactive areas retained. Native E/W/S/N crossings stay module 9/submodule 0 with continuous coordinates. Other progression phases and all mechanics remain unqualified. |
-| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Attached arrows retain target references across handoffs and extra pools. Global spells, roaming terrain/activation, authored secret indices, puzzle/NPC progression and broader inter-pool qualification remain open. |
+| 5. Cross-area interactions | Partial | Native sword/parry, enemy damage, bombs/arrows, ordinary pickups, held-object handoffs, boomerang/rod/hookshot/beam/Somaria impacts demonstrated. Roaming activation, native seam walking and terrain collision have initial gates. Attached arrows retain target references across handoffs and extra pools. Global spells, authored secret indices, puzzle/NPC progression and broader inter-pool qualification remain open. |
 | 6. Connected dungeon floors | Initial implementation, qualification partial | Native floor-map membership with reciprocal-door fallback, original Map8/BG1/BG2 graphics, live resident actors and expanded door/plate animations. Eastern Palace native switch, room201->185, locked185->186/key consumption/reverse door, current-build save/load and replay pass. Actual stairs/other dungeons and complete lighting/effects remain unqualified. |
 | 7. Presentation and state | Partial | Pointer-free native room records, OAM pieces, terrain changes and execution residue serialized with strict preflight and feature identity. 30 idle frames and 70 moving frames across area 18 -> 19 replay byte-identically. Native Mirror/portal round trip across an ordinary seam passed; menu/dialogue/effects/death/Continue and broader travel qualification remain open. |
 | 8. Qualification/handoff | Pending | Content-derived coverage, matched frame/memory/hitch costs, portability, saved individual human observations. |
@@ -421,7 +421,7 @@ remaining dungeon effects still need qualification. Current-build room records
 are pointer-free and validated in schema v10; earlier experiment states are
 disposable. Native SRAM is preserved.
 
-Known implementation work still includes global spell coverage, roaming actors' terrain and
+At this floor checkpoint, known implementation work included global spell coverage, roaming actors' terrain and
 activation, inter-pool NPC interaction/secret progression, and remaining
 interfaces/lighting/windows. This floor checkpoint does not close the full
 burndown and is not a release claim. Whole-map60 FPS remains optional.
@@ -485,3 +485,40 @@ its frame costs are not a performance claim.
 Current record layout remains v10. Global spells, dungeon projectile
 travel, broader enemy/item variants and the remaining progression/effect work
 are not claimed complete. No release has been published.
+
+## Roaming actor checkpoint (2026-10-28)
+
+Area activation now considers resident actors' current coordinates, including
+additional pools, so walking away from an original area does not freeze an
+actor near Link. Actors retain their native slots and parent/projectile
+references. Each outdoor actor uses a prepared stitched terrain window at its
+own position. Both Map16 offsets and the separate native sprite collision
+bounds follow that window; the canonical area context is restored afterward.
+
+Private actor ticks stage terrain writes across windows and publish them only
+after the restoring guest scope succeeds. They save a canonical home-area
+buffer instead of accidentally capturing the last roaming actor's terrain.
+The journal is bounded and transient; pointer-free state layout remains v10.
+
+`roamer-activation-before2` reproduced a physical guard frozen near Link while
+its home area18 was outside the activation halo. `roamer-activation-final`
+uses the same explicit relocation assist, then native AI walks the guard from
+y1544 to1524 across the21/29 seam. The guard continues ticking, remains visible
+and passes a40-frame byte-exact replay with zero scoped failures. A subsequent
+native fence approach produces wall-collision2, turns the guard around and
+never crosses the fence (minimum x2629). Initial placement/facing are assisted;
+movement, collision, turning and result flags are not forced. This does not
+claim that a guard naturally walked the entire distance from its original home.
+
+The two-window terrain probe verifies successful publication, forced-budget
+abort discarding both writes, exact full-state restoration after fixture
+cleanup and unchanged state generation. ROM-free tests cover all65536 world
+tile indices, repeated writes, realm/range rejection and discard. Coordinate,
+dungeon topology and generated-hook tests also pass.
+
+`roamer-weapon-extra-state` retains a real fire-rod impact in an additional
+actor pool, current-build mid-flight save/load, two40-frame exact replays and
+exact guest-scope success/abort restoration. QA is muted and CPU-capped on
+SERVER; its frame costs are not performance measurements. Broader actor and
+terrain variants remain unqualified. NPC/secret progression, global spells,
+dungeon projectile/effect coverage and travel/release checks remain open.
