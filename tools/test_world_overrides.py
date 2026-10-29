@@ -9,6 +9,25 @@ SCRIPT = Path(__file__).with_name('apply_world_overrides.py')
 
 
 class WorldOverridesTest(unittest.TestCase):
+    def test_secret_restores_at_native_return_not_yield(self):
+        with tempfile.TemporaryDirectory(prefix='alttp-world-secrets-') as directory:
+            root=Path(directory);target=root/'bank1b_test_v2.c'
+            target.write_text('\n'.join(
+                f'RecompReturn Overworld_RevealSecret_M{m}X{x}(CpuState *cpu) {{\n'
+                '  if (yielding) { RecompStackPopYield(); return 1; }\n'
+                '  { uint16 _ret_s = cpu->S;  /* RTS pop hardware return frame */\n'
+                '    cpu->S += 2; RecompStackPop(); return 0; }\n}\n'
+                for m in (0,1) for x in (0,1)))
+            def run(*args):
+                return subprocess.run([sys.executable,str(SCRIPT),'--gen-dir',str(root),*args],capture_output=True,text=True)
+            self.assertNotEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);first=target.read_bytes()
+            self.assertEqual(first.count(b'ZeldaWorldSecretBegin();'),4)
+            self.assertEqual(first.count(b'ZeldaWorldSecretEnd();'),4)
+            self.assertNotIn(b'ZeldaWorldSecretEnd(); }\n  if (yielding)',first)
+            self.assertEqual(run('--check').returncode,0)
+            self.assertEqual(run().returncode,0);self.assertEqual(first,target.read_bytes())
+
     def test_native_interaction_and_item_entries(self):
         with tempfile.TemporaryDirectory(prefix='alttp-world-interactions-') as directory:
             root = Path(directory)

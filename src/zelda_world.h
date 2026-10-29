@@ -28,6 +28,8 @@ void ZeldaWorldBombDamageBegin(void);
 void ZeldaWorldMedallionBegin(void);
 void ZeldaWorldInteractionBegin(void);
 void ZeldaWorldItemReceiptBegin(void);
+void ZeldaWorldSecretBegin(void);
+void ZeldaWorldSecretEnd(void);
 void ZeldaWorldProjectileCollisionBegin(void);
 void ZeldaWorldProjectileCollisionEnd(void);
 void ZeldaWorldSpawnBegin(void);

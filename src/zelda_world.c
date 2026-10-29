@@ -58,7 +58,7 @@ typedef struct WorldArea {
   unsigned piece_count;
   uint8_t obsel;
   WorldBackground background;
-  bool valid, dirty, populated;
+  bool valid, dirty, populated, raster_flash;
   WorldActorPool *pools;
 } WorldArea;
 static WorldArea *areas[ZW_AREAS];
@@ -103,7 +103,7 @@ static unsigned weapon_piece_count;
 static bool weapon_projection;
 static int weapon_scroll_x,weapon_scroll_y;
 static uint16_t weapon_adjusted_scroll[4];
-static uint16_t weapon_player_area,weapon_area_bound;
+static uint16_t weapon_player_area,weapon_area_bound,weapon_source_area;
 static int projected_weapon=-1;
 static bool projected_arrow;
 static uint8_t weapon_oam_allocator[12],weapon_oam_pointer[4];
@@ -112,6 +112,8 @@ static uint8_t bomb_damage_image[10][0x1000];
 static uint8_t medallion_image[0x20000];
 static bool medallion_pending;
 static unsigned medallion_slot;
+typedef struct NativeSecretContext {bool active;uint16_t area,pos,stack;} NativeSecretContext;
+static NativeSecretContext secret_context;
 typedef struct ArrowTarget {uint16_t area;uint8_t pool,slot,type,valid;uint16_t spawn;} ArrowTarget;
 typedef struct NativeWeapon {uint8_t fields[38];} NativeWeapon;
 static ArrowTarget arrow_targets[5];
@@ -168,6 +170,26 @@ static void wr16(unsigned off,unsigned n) {g_ram[off]=(uint8_t)n;g_ram[off+1]=(u
  * consecutive words. Projection must restore BG2 Y as well as BG1 Y. */
 static const uint8_t scroll_offsets[4]={0xe0,0xe2,0xe6,0xe8};
 static int clamp(int x,int a,int b) {return x<a?a:x>b?b:x;}
+static uint16_t whiten_background(uint16_t c) {
+ unsigned r=clamp((c&31)+14,0,31),g=clamp(((c>>5)&31)+14,0,31),b=clamp(((c>>10)&31)+14,0,31);
+ return (uint16_t)(r|(g<<5)|(b<<10));
+}
+static bool native_background_flash(void) {
+ /* Recognize the original $0E:D757 palette transform in the actual PPU,
+  * so replay/save-load and frozen redraw derive it from native state. */
+ bool changed=false;
+ for(unsigned i=32;i<128;i++) {
+  uint16_t base=rd16(0xc300+i*2),now=g_ppu->cgram[i];
+  if(now!=whiten_background(base))return false;
+  changed|=now!=base;
+ }
+ return changed;
+}
+static uint16_t background_palette(const WorldArea*r,unsigned index) {
+ if(!r->raster_flash)return r->palette[index];
+ if(!index)return r->palette[0]?whiten_background(r->palette[32]):0;
+ return index>=32&&index<128?whiten_background(r->palette[index]):r->palette[index];
+}
 static unsigned owner(unsigned id) {return id>=ZW_OUTDOOR_AREAS?id:heads[id&63]|(id&64);}
 static int area_x(unsigned id) {return id>=ZW_OUTDOOR_AREAS?((id-ZW_OUTDOOR_AREAS)&15)*512:(id&7)*512;}
 static int area_y(unsigned id) {return id>=ZW_OUTDOOR_AREAS?((id-ZW_OUTDOOR_AREAS)>>4)*512:((id&63)>>3)*512;}
@@ -278,7 +300,7 @@ static uint32_t background_math(const WorldArea*r,uint32_t rgb,unsigned layer,in
    unsigned tile=r->vram[0x1000+(tx>>5)*0x400+(ty>>5)*0x800+(ty&31)*32+(tx&31)];
    p=tile_color(r,tile,x&7,y&7);
   }
-  if(p)other=r->palette[p];else half=false;
+  if(p)other=background_palette(r,p);else half=false;
  }
  unsigned result=0;
  for(unsigned c=0;c<3;c++) {
@@ -298,10 +320,12 @@ static uint32_t tile_pixel(const WorldArea *r,unsigned tile,unsigned x,unsigned 
  /* Mode 1 BG2: low priority is above OBJ 0/1, high above OBJ 0/1/2.
   * Color zero is transparent for priority even though it displays backdrop. */
  *priority=p?(tile&0x2000?3:2):0;
- return color(r->palette[p?((tile>>10)&7)*16+p:0]);
+ return color(background_palette(r,p?((tile>>10)&7)*16+p:0));
 }
 static void rasterize(unsigned id) {
- WorldArea *r=areas[id];if(!r||!r->dirty)return;
+ WorldArea *r=areas[id];if(!r)return;
+ bool flash=native_background_flash();if(flash!=r->raster_flash){r->raster_flash=flash;r->dirty=true;}
+ if(!r->dirty)return;
  unsigned size=r->size;
  if(!r->raster)r->raster=malloc((size_t)size*size*4);
  if(!r->raster_priority)r->raster_priority=malloc((size_t)size*size);
@@ -315,7 +339,7 @@ static void rasterize(unsigned id) {
    }
    size_t i=(size_t)y*512+x;
    r->raster_priority[i]=best?(best>=8?3:2):0;
-   r->raster[i]=background_math(r,color(r->palette[pixel]),selected,(int)x,(int)y);
+   r->raster[i]=background_math(r,color(background_palette(r,pixel)),selected,(int)x,(int)y);
   }
   r->dirty=false;return;
  }
@@ -403,6 +427,12 @@ static void capture(unsigned id) {
  memcpy(r->ram+0x2000,r->tiles,sizeof r->tiles);
  memcpy(r->vram,g_ppu->vram,sizeof r->vram);
  memcpy(r->palette,g_ppu->cgram,sizeof r->palette);
+ /* Store the area's unfiltered palette. The compositor applies a native
+  * global flash to every resident area, never baking it into just one. */
+ if(native_background_flash()) {
+  r->palette[0]=rd16(0xc300);
+  for(unsigned i=32;i<128;i++)r->palette[i]=rd16(0xc300+i*2);
+ }
  r->obsel=g_ppu->obsel;
  capture_background(r);
  r->valid=true;
@@ -665,6 +695,7 @@ static void finish_projected_weapon(void) {
 }
 void ZeldaWorldAncillaBegin(void) {
  if(!live_projection||RtlGuestScopeActive())return;
+ if(weapon_projection&&live_area<ZW_OUTDOOR_AREAS)wr16(0x8a,weapon_source_area);
  finish_projected_weapon();
  restore_mirrored_actor();
  WorldArea*r=areas[live_area];if(!r)return;
@@ -674,7 +705,7 @@ void ZeldaWorldAncillaBegin(void) {
   memcpy(weapon_oam_allocator,g_ram+0xfe0,sizeof weapon_oam_allocator);
   memcpy(weapon_oam_pointer,g_ram+0x90,sizeof weapon_oam_pointer);
   for(unsigned i=0;i<4;i++)weapon_adjusted_scroll[i]=rd16(0x11e + i*2);
-  weapon_player_area=rd16(0x700);weapon_area_bound=rd16(0x716);
+  weapon_player_area=rd16(0x700);weapon_area_bound=rd16(0x716);weapon_source_area=rd16(0x8a);
   weapon_projection=true;
  }
  wr16(0x700,weapon_player_area);wr16(0x716,weapon_area_bound);
@@ -696,6 +727,11 @@ void ZeldaWorldAncillaBegin(void) {
  }
  int x=g_ram[0xc04+k]|g_ram[0xc18+k]<<8,y=g_ram[0xbfa+k]|g_ram[0xc0e + k]<<8;
  if(playable()&&world_projectile(g_ram[0xc4a+k])&&x<ZW_WORLD&&y<ZW_WORLD&&!use_world_collision(x,y,active_world))failures++;
+ /* Authored bomb-wall/rock callers update the area's native SRAM event
+  * byte after RevealSecret returns. Keep that original caller in the
+  * projectile's physical area, then restore Link before the next actor. */
+ if(playable()&&world_projectile(g_ram[0xc4a+k])&&x<ZW_WORLD&&y<ZW_WORLD)
+  wr16(0x8a,owner(ZeldaWorldCell(x,y,(unsigned)active_world)));
  weapon_scroll_x=x-128;weapon_scroll_y=y-112;
  /* Medallion particles include native screen-space coordinates; their
   * ancilla X/Y fields are not necessarily positions (Quake leaves them 0).
@@ -712,6 +748,7 @@ void ZeldaWorldAncillaBegin(void) {
 }
 void ZeldaWorldAncillasEnd(void) {
  if(!weapon_projection||RtlGuestScopeActive())return;
+ if(live_area<ZW_OUTDOOR_AREAS)wr16(0x8a,weapon_source_area);
  finish_projected_weapon();
  restore_mirrored_actor();
  collect_oam(areas[live_area],weapon_pieces,&weapon_piece_count,weapon_scroll_x,weapon_scroll_y);
@@ -774,6 +811,23 @@ void ZeldaWorldItemReceiptBegin(void) {
  ZeldaWorldInteractionBegin();
  if(RtlGuestScopeActive()&&sim_area)sim_event_requested=true;
 }
+void ZeldaWorldSecretBegin(void) {
+ if(!playable()||!collision_window||secret_context.active)return;
+ unsigned pos=g_cpu.X;if(pos>=8192||(pos&1))return;
+ int wx=collision_x+(int)((pos&127)/2)*16,wy=collision_y+(int)(pos/128)*16;
+ if(wx<0||wx>=ZW_WORLD||wy<0||wy>=ZW_WORLD)return;
+ unsigned id=owner(ZeldaWorldCell(wx,wy,(unsigned)collision_world));
+ secret_context.active=true;secret_context.area=rd16(0x8a);
+ secret_context.pos=(uint16_t)pos;secret_context.stack=g_cpu.S;
+ /* ROM-authored secrets are indexed in their canonical native area, while
+  * the caller will still write its original stitched-window tile afterward. */
+ wr16(0x8a,id);g_cpu.X=(uint16_t)(((wy-area_y(id))/16*64+(wx-area_x(id))/16)*2);
+}
+void ZeldaWorldSecretEnd(void) {
+ if(!secret_context.active||g_cpu.S!=secret_context.stack)return;
+ wr16(0x8a,secret_context.area);wr16(4,secret_context.pos);g_cpu.X=secret_context.pos;
+ secret_context.active=false;
+}
 static void world_pc_hook(uint32_t pc,int m,int x) {
  if(previous_pc_hook)previous_pc_hook(pc,m,x);
  pc&=0x7fffff;
@@ -795,6 +849,8 @@ static void world_pc_hook(uint32_t pc,int m,int x) {
  if(pc==0x06ec5c)ZeldaWorldMedallionBegin();
  if(pc==0x05e1a7||pc==0x05e1f0||pc==0x05e219||pc==0x05fa8e)ZeldaWorldInteractionBegin();
  if(pc==0x0799ad)ZeldaWorldItemReceiptBegin();
+ if(pc==0x1bc8a4)ZeldaWorldSecretBegin();
+ if(pc==0x1bc939||pc==0x1bc942)ZeldaWorldSecretEnd();
  if(pc==0x08833c)ZeldaWorldAncillaBegin();
  if(pc==0x08824c)ZeldaWorldAncillasEnd();
  if(pc==0x088d68)ZeldaWorldProjectileCollisionBegin();
@@ -1098,6 +1154,7 @@ bool ZeldaWorldEnabled(void){return enabled;}
 void ZeldaWorldEnable(void){enabled=true;}
 void ZeldaWorldDisable(void){enabled=false;ZeldaWorldReset();}
 void ZeldaWorldReset(void) {
+ secret_context.active=false;
  live_simulated_area=-1;interaction_context_changed=false;
  medallion_pending=false;
  spawn_view=false;replaying_weapon=false;other_weapon_mask=other_weapon_resolved=0;
@@ -1140,7 +1197,9 @@ static bool run_terrain_scope(bool (*callback)(void *),void *context,unsigned bu
  saved.window=collision_window;saved.x=collision_x;saved.y=collision_y;saved.world=collision_world;saved.extent=collision_extent;
  memcpy(saved.before,collision_before,sizeof saved.before);
  ZeldaWorldTerrainReset(&terrain_edits,(unsigned)world);active_terrain_edits=&terrain_edits;collision_window=false;
+ NativeSecretContext saved_secret=secret_context;
  bool ok=RtlGuestScopeRun(callback,context,budget);
+ secret_context=saved_secret;
  active_terrain_edits=NULL;
  collision_window=saved.window;collision_x=saved.x;collision_y=saved.y;collision_world=saved.world;collision_extent=saved.extent;
  memcpy(collision_before,saved.before,sizeof collision_before);

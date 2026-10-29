@@ -558,3 +558,31 @@ tags. Three regeneration-hook tests pass. Tested SERVER executable SHA256:
 `a77f68fd67caab3d3f5d605c0b32df7a9eb46a002310afcaf3674ba175e614b1`.
 Authored secrets, complete spell palette/rumble presentation, dungeon projectile
 terrain/lighting and focused travel/release qualification remain open.
+
+## Authored secret lookup and global flash checkpoint (2026-10-28)
+
+Secret lookups translate stitched collision-window positions to the canonical
+ROM area's Map16 index, then restore the caller's original index at the actual
+native return. The caller still writes the correct world tile. Traveling
+weapons temporarily select their physical native area for the original
+bomb-wall/rock event-flag caller, restoring Link's area before actors run.
+Scope failure restores transient lookup context as well as native state.
+
+`authored-secret-dash-ability` derives area19/position1286/data132 from the ROM
+table, starts its event bit clear, and uses a native boots dash against the
+authored rock. The original code sets event00->20, reports secretFF and
+changes terrain0226->0918. Thirty frames replay byte-exactly, failures0.
+Position, equipment and the separate dash ability are explicit prerequisites;
+the result flag is never set by the fixture. Earlier lift/dash probes lacked
+the correct action or native ability and are retained as failed setup probes.
+
+Global background flashes are derived from the actual native PPU palette's
+original saturated+14 transform, so frozen redraw and restored states need no
+extra clock or external flag. Area caches retain unfiltered colors and each
+visible raster applies that same native flash. `native-ether-world-flash`
+compares an unchanged neighboring-area patch: mean channel brightness92.506
+normally and206.206 during two observed native flashes, failures0. Four
+regeneration-hook tests pass, including secret cleanup at RTS rather than yield.
+Tested SERVER binary14ad675dd2931a8f231eba128e5b2966e7b468682ceb938d276b63113f713b9c.
+Peg/hardcoded puzzle updates, dungeon projectile terrain/lighting and remaining
+travel/release gates are still open.
