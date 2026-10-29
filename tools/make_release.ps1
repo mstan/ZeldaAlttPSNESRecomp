@@ -31,13 +31,22 @@ Example:
 param(
   [Parameter(Mandatory = $true)][string]$Version,
   [string]$BuildDir = 'build-recompui',
+  [string]$EngineRoot = '',
   [string]$RuntimeBinDir = 'C:\msys64\mingw64\bin',
   [ValidateSet('SDL3', 'SDL2')][string]$SdlBackend = 'SDL3'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$build = Join-Path $root $BuildDir
+$build = if ([IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+if (-not $EngineRoot) {
+  $cache = Join-Path $build 'CMakeCache.txt'
+  if (Test-Path -LiteralPath $cache) {
+    $engineSetting = Select-String -LiteralPath $cache -Pattern '^SNESRECOMP_ROOT:[^=]+=(.+)$' | Select-Object -First 1
+    if ($engineSetting) { $EngineRoot = $engineSetting.Matches[0].Groups[1].Value }
+  }
+  if (-not $EngineRoot) { $EngineRoot = Join-Path $root 'snesrecomp' }
+}
 $exeName = 'ZeldaALttPSNESRecomp.exe'
 $exe = Join-Path $build $exeName
 $assets = Join-Path $build 'assets'
@@ -76,12 +85,26 @@ if (-not $stageFull.StartsWith($outFull, [StringComparison]::OrdinalIgnoreCase) 
     -not $zipFull.StartsWith($outFull, [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Refusing to clean release paths outside release-stage.'
 }
+if ((Test-Path -LiteralPath $out) -and ((Get-Item -LiteralPath $out).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+  throw 'Refusing to use a linked release-stage directory.'
+}
 
 if (Test-Path -LiteralPath $stage) {
-  Remove-Item -LiteralPath $stage -Recurse -Force
+  $stageItem = Get-Item -LiteralPath $stage
+  if ($stageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Refusing to replace a linked release stage.'
+  }
+  $stageContents = @($stageItem) + @(Get-ChildItem -LiteralPath $stage -Recurse -Force)
+  if ($stageContents | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $_.Name -eq '.git' }) {
+    throw 'Refusing to replace a release stage containing a link or nested repository.'
+  }
+  Remove-Item -LiteralPath $stage -Recurse -ErrorAction Stop
 }
 if (Test-Path -LiteralPath $zip) {
-  Remove-Item -LiteralPath $zip -Force
+  if ((Get-Item -LiteralPath $zip).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Refusing to replace a linked release archive.'
+  }
+  Remove-Item -LiteralPath $zip -ErrorAction Stop
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
@@ -90,6 +113,8 @@ Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
 New-Item -ItemType Directory -Path (Join-Path $stage 'docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'docs\COVERAGE_2026-10-18.md') -Destination (Join-Path $stage 'docs')
+Copy-Item -LiteralPath (Join-Path $root 'docs\SEAMLESS-WORLD.md') -Destination (Join-Path $stage 'docs')
+Copy-Item -LiteralPath (Join-Path $root 'docs\images') -Destination (Join-Path $stage 'docs') -Recurse
 Copy-Item -LiteralPath $assets -Destination $stage -Recurse
 # Release-owned mod catalog, when the build stages one. Ships as a nested
 # directory tree, which is exactly what made portable ZIP entry names matter
@@ -106,7 +131,7 @@ if (Test-Path -LiteralPath $mods) {
 $stageMods = Join-Path $stage 'mods'
 if (Test-Path -LiteralPath $stageMods) {
   Get-ChildItem -LiteralPath $stageMods -Recurse -File -Filter 'state.toml*' |
-    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -ErrorAction Stop }
 }
 # Never publish an unattended diagnostic build.
 $cache = Join-Path $build 'CMakeCache.txt'
@@ -127,7 +152,7 @@ if (Select-String -LiteralPath $cache -Pattern '^SNESRECOMP_ENABLE_TRACE:[^=]+=O
 # fails the release rather than shipping. Builds that link the MinGW runtime
 # statically (SNESRECOMP_STATIC_RUNTIME, the default) correctly ship no
 # libgcc/libstdc++/libwinpthread at all.
-. (Join-Path $root 'snesrecomp\tools\release\RuntimeDllClosure.ps1')
+. (Join-Path $EngineRoot 'tools\release\RuntimeDllClosure.ps1')
 
 $sdlDll = "$SdlBackend.dll"
 $sdlSource = Join-Path $build $sdlDll

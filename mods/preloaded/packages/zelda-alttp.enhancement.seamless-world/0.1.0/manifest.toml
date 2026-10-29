@@ -1,0 +1,29 @@
+format_version = 1
+id = "zelda-alttp.enhancement.seamless-world"
+version = "0.1.0"
+name = "Seamless World"
+author = "mstan"
+description = "Experimental live Light/Dark worlds and connected dungeon floors for A Link to the Past."
+license = "MIT"
+resolver = "declarative"
+save_compatibility = "alttp-world-v11"
+
+[[target]]
+game_id = "zelda-alttp-us"
+rom_sha256 = "66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb"
+
+[[feature]]
+id = "seamless-world"
+name = "Seamless World"
+experimental = true
+description = "Experimental local play: persistent actors, cross-boundary combat and connected dungeon floors. Mouse wheel zoom; F4 shows the whole current map. Special entrances and floor travel keep their native routing."
+group = "Camera"
+default_enabled = false
+
+[[plugin]]
+feature = "seamless-world"
+id = "zelda-alttp.seamless-world"
+
+[[plugin]]
+feature = "seamless-world"
+id = "zelda-alttp.display-mode"

@@ -19,6 +19,7 @@
 
 #include "types.h"
 #include "zelda_rtl.h"
+#include "zelda_world.h"
 #include "common_cpu_infra.h"
 #include "framedump.h"
 #include "config.h"
@@ -278,7 +279,9 @@ void NORETURN Die(const char *error) {
    * includes it and preserves a timestamped crash copy (see
    * host_report_has_fatal in post_mortem.c). */
   host_report_fatal(error);
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
+  const char *hidden_qa=getenv("SNESRECOMP_QA_HIDDEN_WINDOW");
+  if (!hidden_qa || hidden_qa[0]!='1')
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
   exit(1);
 }
@@ -390,6 +393,32 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 }
 
 static void DrawPpuFrameWithPerf(void) {
+  if (ZeldaWorldEnabled()) {
+    /* Advance native raster/IRQ work once, then compose the independent world
+     * surface. Its dimensions never change the console framebuffer or pitch. */
+    static uint8_t native[kPpuBufWidth * 4 * 240];
+    static bool native_valid;
+    /* Paused resize/zoom composes from the frozen native image. Rendering
+     * another console field can run raster IRQ work and is not a pause. */
+    if (!g_paused || !native_valid) {
+      ZeldaWorldPrepareNativeHud();
+      RtlDrawPpuFrame(native, (size_t)g_snes_width*4, g_ppu_render_flags);
+      native_valid = true;
+    }
+    int dw=0,dh=0,w=g_snes_width,h=g_snes_height,pitch=0;
+    g_renderer_funcs.GetOutputSize(&dw,&dh);
+    const uint32_t *world=ZeldaWorldPresent((uint32_t*)native,g_snes_width,dw,dh,&w,&h);
+    uint8_t *pixels=NULL;
+    g_renderer_funcs.BeginDraw(w,h,&pixels,&pitch);
+    if(pixels) {
+      const uint8_t *source=world?(const uint8_t*)world:native;
+      for(int y=0;y<h;y++)memcpy(pixels+(size_t)y*pitch,source+(size_t)y*w*4,(size_t)w*4);
+      debug_server_note_composed_frame(pixels,(unsigned)pitch,w,h);
+      FrameDump_Present(snes_frame_counter?snes_frame_counter-1:0,pixels,pitch,w,h);
+      g_renderer_funcs.EndDraw();
+    }
+    return;
+  }
   const int render_scale = 1;
   uint8 *pixel_buffer = 0;
   int pitch = 0;
@@ -565,6 +594,18 @@ static void SdlRenderer_GetOutputSize(int *width, int *height) {
 }
 
 static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
+  int tw=0,th=0;
+  snesrecomp_sdl_get_texture_size(g_texture,&tw,&th);
+  if(width>tw||height>th) {
+    SDL_DestroyTexture(g_texture);
+    g_texture=SDL_CreateTexture(g_renderer,SDL_PIXELFORMAT_ARGB8888,
+        SDL_TEXTUREACCESS_STREAMING,width,height);
+    if(!g_texture){*pixels=NULL;return;}
+    snesrecomp_sdl_set_texture_opaque(g_texture);
+    snesrecomp_sdl_set_texture_linear(g_texture,g_config.linear_filtering);
+  }
+  if(ZeldaWorldEnabled()&&!g_config.ignore_aspect_ratio)
+    snesrecomp_sdl_set_render_logical_size(g_renderer,width,height);
   g_sdl_renderer_rect.w = width;
   g_sdl_renderer_rect.h = height;
   if (!snesrecomp_sdl_lock_texture(g_texture, &g_sdl_renderer_rect,
@@ -1266,6 +1307,7 @@ int main(int argc, char** argv) {
 
   extern const RtlGameInfo kSmwGameInfo;
   RtlRegisterGame(&kSmwGameInfo);
+  ZeldaWorldSetup();
   /* RtlRegisterGame arms MSU-1 from the environment; now it can derive a pack
    * base from the ROM path when SNESRECOMP_MSU1=auto. */
   { extern void msu1_set_rom_path(const char *); msu1_set_rom_path(rom_path_buf); }
@@ -1307,6 +1349,8 @@ error_reading:;
 #endif
 
   /* SDL3 dropped the x/y arguments from SDL_CreateWindow. */
+  { const char *hidden_qa=getenv("SNESRECOMP_QA_HIDDEN_WINDOW");
+    if(hidden_qa&&hidden_qa[0]=='1')g_win_flags|=SDL_WINDOW_HIDDEN; }
   SDL_Window *window = snesrecomp_sdl_create_window(
       kWindowTitle, window_width, window_height, g_win_flags);
   if(window == NULL) {
@@ -1315,6 +1359,7 @@ error_reading:;
     return 1;
   }
   g_window = window;
+  ZeldaWorldAttachWindow(window);
   SDL_SetWindowHitTest(window, HitTestCallback, NULL);
   host_report_breadcrumb("window created: %dx%d flags=0x%x",
                          window_width, window_height, g_win_flags);
@@ -1483,7 +1528,9 @@ error_reading:;
      * whole crash-capture pipeline (minidump + report + crash copy). */
     host_report_crash_test_tick();
 
+    if (ZeldaWorldPollUI(g_paused!=0)) HandleCommand(kKeys_Pause, true);
     while (SDL_PollEvent(&event)) {
+      if (ZeldaWorldEvent(&event)) continue;
       switch (event.type) {
       case SDL_CONTROLLERDEVICEADDED:
         OpenOneGamepad(SNESRECOMP_SDL_EVENT_DEVICE(event));
@@ -1547,6 +1594,7 @@ error_reading:;
     }
 
     if (g_paused) {
+      if (ZeldaWorldEnabled()) DrawPpuFrameWithPerf();
       SDL_Delay(16);
       continue;
     }

@@ -314,6 +314,8 @@
       <ExcludedFromBuild Condition="'$(Configuration)'=='Production'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="zelda_cpu_infra.c" />
+    <ClCompile Include="zelda_world.c" />
+    <ClCompile Include="mods\zelda_world_plugin.c" />
     <ClCompile Include="zelda_rtl.c" />
     <ClCompile Include="..\snesrecomp\runner\src\snes\apu.c">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Disabled</Optimization>

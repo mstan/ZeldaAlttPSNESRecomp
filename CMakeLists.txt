@@ -77,6 +77,8 @@ add_executable(ZeldaALttPSNESRecomp
     src/zelda_00.c
     src/gen_stubs.c
     src/zelda_cpu_infra.c
+    src/zelda_world.c
+    src/mods/zelda_world_plugin.c
     src/zelda_rtl.c
     src/zelda_spc_player.c
 
@@ -157,3 +159,29 @@ endif()
 # Mods page would have been empty in every build and release zip.
 snesrecomp_target_mod_catalog(ZeldaALttPSNESRecomp
     "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
+
+# Small ROM-free correctness gates; opt into them with BUILD_TESTING.
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(alttp_world_coordinates_test tests/world_coordinates_test.c)
+    set_target_properties(alttp_world_coordinates_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_include_directories(alttp_world_coordinates_test PRIVATE src)
+    target_compile_features(alttp_world_coordinates_test PRIVATE c_std_11)
+    add_test(NAME alttp_world_coordinates COMMAND alttp_world_coordinates_test)
+    add_executable(alttp_dungeon_graph_test tests/dungeon_graph_test.c)
+    set_target_properties(alttp_dungeon_graph_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_include_directories(alttp_dungeon_graph_test PRIVATE src)
+    target_compile_features(alttp_dungeon_graph_test PRIVATE c_std_11)
+    add_test(NAME alttp_dungeon_graph COMMAND alttp_dungeon_graph_test)
+    add_executable(alttp_world_terrain_test tests/world_terrain_test.c)
+    set_target_properties(alttp_world_terrain_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_include_directories(alttp_world_terrain_test PRIVATE src)
+    target_compile_features(alttp_world_terrain_test PRIVATE c_std_11)
+    add_test(NAME alttp_world_terrain COMMAND alttp_world_terrain_test)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME alttp_world_generated_hooks
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_world_overrides.py")
+endif()

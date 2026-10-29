@@ -5,3 +5,7 @@ cfg_roots = true
 [[postprocess]]
 script = "tools/apply_widescreen_overrides.py"
 args = ["--gen-dir", "{out_dir}"]
+
+[[postprocess]]
+script = "tools/apply_world_overrides.py"
+args = ["--gen-dir", "{out_dir}"]

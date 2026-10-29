@@ -2,10 +2,13 @@
 #include "desktop/sdl_compat.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include "types.h"
 #include "util.h"
 #include "glsl_shader.h"
 #include "config.h"
+#include "desktop/display_aspect.h"
 
 #define CODE(...) #__VA_ARGS__
 
@@ -16,6 +19,7 @@ static int g_draw_width, g_draw_height;
 static unsigned int g_program, g_VAO;
 static GlTextureWithSize g_texture;
 static GlslShader *g_glsl_shader;
+static bool g_want_screenshot;
 
 static void GL_APIENTRY MessageCallback(GLenum source,
                 GLenum type,
@@ -41,6 +45,8 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
 
   SDL_GL_SetSwapInterval(1);
   ogl_LoadFunctions();
+  { GLint limit=0;glGetIntegerv(GL_MAX_TEXTURE_SIZE,&limit);
+    fprintf(stderr,"[presenter] GL renderer=%s max_texture=%d\n",glGetString(GL_RENDERER),limit); }
 
   if (!ogl_IsVersionGEQ(3, 3))
     Die("You need OpenGL 3.3");
@@ -137,7 +143,7 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
 
   if (g_config.shader)
     g_glsl_shader = GlslShader_CreateFromFile(g_config.shader);
-  
+
   return true;
 }
 
@@ -149,7 +155,7 @@ static void OpenGLRenderer_GetOutputSize(int *width, int *height) {
 }
 
 static void OpenGLRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
-  int size = width * height;
+  size_t size = (size_t)width * (size_t)height;
 
   if (size > g_screen_buffer_size) {
     g_screen_buffer_size = size;
@@ -162,23 +168,35 @@ static void OpenGLRenderer_BeginDraw(int width, int height, uint8 **pixels, int 
   *pixels = g_screen_buffer;
   *pitch = width * 4;
 }
+void OpenGLRenderer_RequestScreenshot(void) {g_want_screenshot=true;}
+static void bmp_u32(uint8_t*p,uint32_t n) {for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(i*8));}
+static void CaptureGpu(int width,int height) {
+  if(width<=0||height<=0||width>8192||height>8192)return;
+  size_t size=(size_t)width*height*4;uint8_t*p=malloc(size);if(!p)return;
+  glReadPixels(0,0,width,height,GL_BGRA,GL_UNSIGNED_BYTE,p);
+  GLenum error=glGetError();
+  if(error!=GL_NO_ERROR){fprintf(stderr,"[presenter] GPU capture failed: GL 0x%x\n",error);free(p);return;}
+  MkDir("screenshots");char path[256];
+  snprintf(path,sizeof path,"screenshots/gpu_%llu.bmp",(unsigned long long)SDL_GetPerformanceCounter());
+  FILE*f=fopen(path,"wb");if(f) {
+    uint8_t h[54]={0};h[0]='B';h[1]='M';bmp_u32(h+2,(uint32_t)(54+size));bmp_u32(h+10,54);
+    bmp_u32(h+14,40);bmp_u32(h+18,(uint32_t)width);bmp_u32(h+22,(uint32_t)height);
+    h[26]=1;h[28]=32;bmp_u32(h+34,(uint32_t)size);
+    fwrite(h,1,sizeof h,f);fwrite(p,1,size,f);fclose(f);
+    fprintf(stderr,"[presenter] GPU capture: %s\n",path);
+  }free(p);
+}
 
 static void OpenGLRenderer_EndDraw(void) {
   int drawable_width, drawable_height;
 
   snesrecomp_sdl_get_drawable_size(g_window, &drawable_width, &drawable_height);
-  
-  int viewport_width = drawable_width, viewport_height = drawable_height;
 
-  if (!g_config.ignore_aspect_ratio) {
-    if (viewport_width * g_draw_height < viewport_height * g_draw_width)
-      viewport_height = viewport_width * g_draw_height / g_draw_width;  // limit height
-    else
-      viewport_width = viewport_height * g_draw_width / g_draw_height;  // limit width
-  }
-
-  int viewport_x = (drawable_width - viewport_width) >> 1;
-  int viewport_y = (viewport_height - viewport_height) >> 1;
+  SnesDisplayViewport viewport={0,0,drawable_width,drawable_height};
+  if(!g_config.ignore_aspect_ratio&&g_draw_width>0&&g_draw_height>0)
+    viewport=SnesDisplayAspect_FitViewport((double)g_draw_width/g_draw_height,drawable_width,drawable_height);
+  int viewport_x=viewport.x,viewport_y=viewport.y;
+  int viewport_width=viewport.width,viewport_height=viewport.height;
 
   glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
   if (g_draw_width == g_texture.width && g_draw_height == g_texture.height) {
@@ -204,6 +222,7 @@ static void OpenGLRenderer_EndDraw(void) {
     GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
   }
 
+  if(g_want_screenshot){g_want_screenshot=false;CaptureGpu(drawable_width,drawable_height);}
   SDL_GL_SwapWindow(g_window);
 }
 
