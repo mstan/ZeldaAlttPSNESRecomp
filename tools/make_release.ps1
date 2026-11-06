@@ -111,6 +111,7 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item -LiteralPath $exe -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $root 'PERMISSIONS.md') -Destination $stage
 New-Item -ItemType Directory -Path (Join-Path $stage 'docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'docs\COVERAGE_2026-10-18.md') -Destination (Join-Path $stage 'docs')
 Copy-Item -LiteralPath (Join-Path $root 'docs\SEAMLESS-WORLD.md') -Destination (Join-Path $stage 'docs')
