@@ -295,3 +295,7 @@ redistribution.
 ## Coverage survey and regeneration
 
 Game-owned generation policy is in `recomp/generate.toml`; the shared framework runs the same hooks for `tools/regen.sh` and launcher rebuilds. See the [2026-10-18 coverage survey](docs/COVERAGE_2026-10-18.md) for verified ROM identity, observed scenes, corrections, and remaining validation limits.
+
+The normal title frame scheduler is host-native (`ZELDA_SCHEDULER_IMPL=HLE`). The host owns vblank orchestration and the main-loop yield, while OAM, game-module and sprite routines retain the authoritative guest CPU dispatcher. Native APU timing and DSP mixing remain selected. A separate developer reference is selectable at build time with `ZELDA_SCHEDULER_IMPL=LLE`.
+
+The polyhedral coroutine retains its dedicated guest stack and paired return frames. Its register context stays separate from the main thread, preventing its calls from overwriting the selected-item HUD state. The framework's optional Lua TCP interface is also available when built with `SNESRECOMP_ENABLE_LUA=ON`.

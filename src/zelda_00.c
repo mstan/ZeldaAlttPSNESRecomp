@@ -10,11 +10,6 @@
 uint16 counter_global_frames = 0;
 
 
-/* HLE frame driver (RunOneFrameOfGame_Internal) removed 2026-07-19 —
- * Zelda is LLE-only now; the faithful $00:8034 scheduler in zelda_rtl.c
- * is the sole per-frame path. counter_global_frames storage stays above
- * for framework-side frame counting. */
-
 void ResetSpritesFunc(int wh) {
   for (; wh < 128; wh++)
     g_ram[0x201 + wh * 4] = 0xf0;
