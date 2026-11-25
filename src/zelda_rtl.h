@@ -11,6 +11,8 @@ enum { kZeldaWsExtraMax = 95 };
 
 void ZeldaDrawPpuFrame(void);
 void RunOneFrameOfGame(void);
+uint32_t ZeldaFrameDriverState(void);
+void ZeldaRestoreFrameDriverState(uint32_t state);
 
 // Widescreen game policy (read-only): derive the PPU's per-side visible margin
 // from live WRAM (room / scroll bounds) each frame and apply it. Called from
