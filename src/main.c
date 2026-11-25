@@ -49,6 +49,7 @@
 
 #include "launcher.h"
 #include "host_args.h"
+#include "desktop/headless_capture.h"
 #include "keybinds.h"
 #include "host_report.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, RtlWidescreenPresent
@@ -202,7 +203,7 @@ static void LoadScript(const char *path) {
     if (strcmp(cmd, "wait") == 0) {
       int frames = (sscanf(line, "%*s %d", &n) == 1) ? n : 0;
       pending_wait += frames;
-    } else if (strcmp(cmd, "loadstate") == 0) {
+    } else if (strcmp(cmd, "loadstate") == 0 || strcmp(cmd, "savestate") == 0) {
       // loadstate N — load savestate slot N (0-indexed, F1=0)
       int slot = 0;
       sscanf(line, "%*s %d", &slot);
@@ -211,7 +212,7 @@ static void LoadScript(const char *path) {
         g_script_entries = (ScriptEntry *)realloc(g_script_entries, cap * sizeof(ScriptEntry));
       }
       ScriptEntry *e = &g_script_entries[g_script_count++];
-      e->mask = 0x80000000 | (slot & 0xF);  // special flag: high bit = loadstate
+      e->mask = (strcmp(cmd, "savestate") == 0 ? 0x40000000u : 0x80000000u) | (slot & 0xF);
       e->hold_frames = 1;
       e->wait_frames = pending_wait;
       pending_wait = 0;
@@ -258,6 +259,10 @@ static uint32 TickScript(void) {
       if (e->mask & 0x80000000) {
         // loadstate command
         RtlSaveLoad(kSaveLoad_Load, e->mask & 0xF);
+        return 0;
+      }
+      if (e->mask & 0x40000000u) {
+        RtlSaveLoad(kSaveLoad_Save, e->mask & 0xF);
         return 0;
       }
       return e->mask;
@@ -581,12 +586,17 @@ static bool SdlRenderer_Init(SDL_Window *window) {
   return true;
 }
 
+static uint8 **g_capture_pixels_ref;
+static int *g_capture_pitch_ref;
+static uint32_t g_capture_tick = 1;
+
 static void SdlRenderer_Destroy(void) {
   SDL_DestroyTexture(g_texture);
   SDL_DestroyRenderer(g_renderer);
 }
 
 static void SdlRenderer_GetOutputSize(int *width, int *height) {
+  if (HeadlessCapture_Enabled()) { HeadlessCapture_OutputSize(width, height); return; }
   if (!snesrecomp_sdl_get_render_output_size(g_renderer, width, height)) {
     *width = 0;
     *height = 0;
@@ -594,6 +604,8 @@ static void SdlRenderer_GetOutputSize(int *width, int *height) {
 }
 
 static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
+  g_capture_pixels_ref = pixels;
+  g_capture_pitch_ref = pitch;
   int tw=0,th=0;
   snesrecomp_sdl_get_texture_size(g_texture,&tw,&th);
   if(width>tw||height>th) {
@@ -616,6 +628,30 @@ static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pi
 }
 
 static void SdlRenderer_EndDraw(void) {
+  if (HeadlessCapture_Enabled()) {
+    /* Fit software game pixels to the logical viewport; presentation
+     * filters and overlays are not part of this capture. */
+    int ow = 0, oh = 0, dw, dh;
+    HeadlessCapture_OutputSize(&ow, &oh);
+    if (g_config.ignore_aspect_ratio) { dw = ow; dh = oh; }
+    else {
+      double s = (double)ow / g_sdl_renderer_rect.w, t = (double)oh / g_sdl_renderer_rect.h;
+      if (t < s) s = t;
+      dw = (int)(g_sdl_renderer_rect.w * s + 0.5); dh = (int)(g_sdl_renderer_rect.h * s + 0.5);
+    }
+    HeadlessCapture_Present(*g_capture_pixels_ref, *g_capture_pitch_ref, g_sdl_renderer_rect.w,
+        g_sdl_renderer_rect.h, (ow - dw) / 2, (oh - dh) / 2, dw, dh, g_capture_tick);
+    if (HeadlessCapture_AudioEnabled()) {
+      static int16 capture_audio[2048 * 2];
+      int n = HeadlessCapture_AudioFramesFor(g_capture_tick);
+      if (n > 2048) n = 2048;
+      RtlRenderAudio(capture_audio, n, 2);
+      HeadlessCapture_Audio(capture_audio, n, g_capture_tick);
+    }
+    ++g_capture_tick;
+    SDL_UnlockTexture(g_texture);
+    return;
+  }
   //  uint64 before = SDL_GetPerformanceCounter();
   SDL_UnlockTexture(g_texture);
   //  uint64 after = SDL_GetPerformanceCounter();
@@ -852,6 +888,9 @@ int main(int argc, char** argv) {
   const char *program_path = (argc >= 1) ? argv[0] : NULL;
   SnesrecompHostArgs args;
   if (!snesrecomp_host_args_parse(&argc, &argv, &args)) return 2;
+  const bool capture_mode = HeadlessCapture_Configure(&args);
+  if (HeadlessCapture_Failed()) { HeadlessCapture_Finish(); return 3; }
+  if (capture_mode) HeadlessCapture_SelectVideoDriver(false);
   if (args.help) { snesrecomp_host_args_usage(program_path, NULL); return 0; }
   if (!snesrecomp_host_args_reject_unknown(argc, argv, program_path, NULL))
     return 2;
@@ -1263,12 +1302,20 @@ int main(int argc, char** argv) {
   if (g_config.gamepad_deadzone <= 0 || g_config.gamepad_deadzone > 32767)
     g_config.gamepad_deadzone = 10000;
 
+  if (capture_mode) {
+    g_config.autosave = false;
+    g_config.disable_frame_delay = true;
+    g_config.skip_launcher = true;
+    g_config.fullscreen = 0;
+    g_config.output_method = kOutputMethod_SDLSoftware;
+  }
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
   // set up SDL
   /* Return convention flipped in SDL3 (0 == success became true == success);
    * the raw `!= 0` form compiles clean and fails init on every good start. */
-  if (!snesrecomp_sdl_init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER)) {
+  if (!snesrecomp_sdl_init(capture_mode ? SDL_INIT_VIDEO :
+                           SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER)) {
     host_report_breadcrumb("SDL_Init FAILED: %s", SDL_GetError());
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
@@ -1386,7 +1433,10 @@ error_reading:;
   g_spc_player->initialize(g_spc_player);
   host_report_breadcrumb("SPC player initialized");
 
-  if (g_config.enable_audio) {
+  if (capture_mode) {
+    g_audio_channels = 2;
+    RtlSetAudioOutputRate(HeadlessCapture_AudioRate());
+  } else if (g_config.enable_audio) {
     /* Enumerate output devices into the breadcrumb ring: which device
      * SDL picks (and what else was available) is exactly the per-machine
      * variable a non-reproducible audio/boot crash report needs. */
@@ -1500,6 +1550,15 @@ error_reading:;
 
   if (g_config.autosave)
     HandleCommand(kKeys_Load + 0, true);
+
+  if (args.load_state) {
+    if (!RtlLoadSnapshot(args.load_state)) {
+      fprintf(stderr, "capture: cannot load state '%s'\n", args.load_state);
+      HeadlessCapture_Finish();
+      return 3;
+    }
+    host_report_breadcrumb("load state loaded: %s", args.load_state);
+  }
 
   if (script_file)
     LoadScript(script_file);
@@ -1636,6 +1695,7 @@ error_reading:;
 
     uint32 inputs = g_input_state | g_pad_buttons | g_gamepad[0].axis_buttons | g_gamepad[1].axis_buttons << 12;
     inputs |= TickScript();
+    inputs |= HeadlessCapture_InputWord(frameCtr + 1);
     inputs |= debug_server_get_controller_inputs();
     RtlRunFrame(inputs | GetActiveControllers() | debug_server_get_controller_active_mask());
 
@@ -1688,6 +1748,8 @@ error_reading:;
           g_turbo = 0;
       }
     }
+    if (HeadlessCapture_Failed() ||
+        (HeadlessCapture_ExitFrame() && frameCtr >= HeadlessCapture_ExitFrame())) running = false;
     RtlAudioSetFastForward(g_turbo != 0);
     g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
 
@@ -1732,6 +1794,7 @@ error_reading:;
     }
   }
 
+  HeadlessCapture_Finish();
   if (g_config.autosave)
     HandleCommand(kKeys_Save + 0, true);
 
@@ -1757,7 +1820,7 @@ error_reading:;
 
   SDL_DestroyWindow(window);
   SDL_Quit();
-  return 0;
+  return HeadlessCapture_Failed() ? 3 : 0;
 }
 
 static void RenderDigit(uint8 *dst, size_t pitch, int digit, uint32 color, bool big) {

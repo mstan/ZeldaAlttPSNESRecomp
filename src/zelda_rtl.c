@@ -241,6 +241,15 @@ void ZeldaDrawPpuFrame(void) {
   }
 }
 
+static bool g_did_reset, g_first_frame_done;
+uint32_t ZeldaFrameDriverState(void) {
+  return g_did_reset | (g_first_frame_done << 1);
+}
+void ZeldaRestoreFrameDriverState(uint32_t state) {
+  g_did_reset = (state & 1) != 0;
+  g_first_frame_done = (state & 2) != 0;
+}
+
 void RunOneFrameOfGame(void) {
   // First-call reset gate. Was previously `if (*(uint16*)$7F8000 == 0) I_RESET()`,
   // which silently relied on WRAM being zero-initialized at power-on. Real hardware
@@ -248,8 +257,6 @@ void RunOneFrameOfGame(void) {
   // would be skipped, leaving $0100 (GameMode) at 0x55 — out-of-bounds for the
   // 42-entry dispatch table at PC 0x009329. Use a host-side bool instead so the
   // gate is independent of WRAM contents.
-  static bool g_did_reset = false;
-  static bool g_first_frame_done = false;
   if (!g_did_reset) {
     cpu_state_init(&g_cpu, g_ram);
     cpu_trace_px_breadcrumb(&g_cpu, 0x1000, "after_cpu_state_init");

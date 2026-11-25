@@ -102,8 +102,9 @@ recomp_target_launcher_ui(ZeldaALttPSNESRecomp
     CONSOLE snes
     BOXART ${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga)
 
+# Keep the root version file from shadowing the C++ standard <version>.
 target_include_directories(ZeldaALttPSNESRecomp PRIVATE
-    ${CMAKE_SOURCE_DIR}
+    "$<$<COMPILE_LANGUAGE:C>:${CMAKE_SOURCE_DIR}>"
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/recomp
     ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
