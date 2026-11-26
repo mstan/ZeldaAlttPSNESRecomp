@@ -17,7 +17,7 @@ id = "widescreen"
 name = "Widescreen (adaptive)"
 description = "Widen the view to match your window at a fixed 224-line height. ALttP has no fixed 16:9 mode: the logical width follows the live window aspect, so a 4:3 window renders authentic and wider windows reveal more of the room."
 group = "Display"
-default_enabled = false
+default_enabled = true
 
 [[plugin]]
 feature = "widescreen"

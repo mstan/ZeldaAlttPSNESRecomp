@@ -106,8 +106,9 @@ System shortcuts (configured in `config.ini`'s `[KeyMap]` section):
 
 ## Adaptive widescreen
 
-Enable **Adaptive view** in the launcher, or set `Widescreen = 1` under
-`[Graphics]` in `config.ini`. The logical height remains 224 pixels while the
+**Widescreen (adaptive)** is enabled by default on the launcher's **Mods** page.
+Turn it off there for the original view; saved on/off choices are preserved.
+The logical height remains 224 pixels while the
 logical width follows the live window or fullscreen aspect ratio. Resizing a
 window wider therefore reveals more of the overworld or dungeon instead of
 stretching a fixed 16:9 image. At the native aspect the renderer returns to the
@@ -152,10 +153,10 @@ section.
    ```bash
    bash tools/regen.sh            # add --no-tests to skip the framework suite
    ```
-   This applies the bundled MSU-1 patch to a throwaway copy of your stock
-   ROM (`tools/apply_msu_patch.py`), regenerates `src/gen/` from the
-   patched image, and syncs `recomp/funcs.h`. Your stock ROM is left
-   untouched and is what you load at runtime. The script builds and requires
+   This verifies and analyzes the original image identified by
+   `rom_identity.txt`, regenerates `src/gen/`, and syncs `recomp/funcs.h`.
+   Keep that original image read-only; do not recompile a modified copy.
+   Generation hooks are declared in `recomp/generate.toml`. The script builds and requires
    the fast native analyzer; set `SNESRECOMP_ANALYSIS_BACKEND=python` only to
    run the slower reference implementation.
 3. Rebuild as above.
