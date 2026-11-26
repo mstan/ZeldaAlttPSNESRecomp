@@ -148,22 +148,13 @@ if (Select-String -LiteralPath $cache -Pattern '^SNESRECOMP_ENABLE_TRACE:[^=]+=O
 # it is simply absent, or 0xC000007B ("unable to start correctly") if the
 # loader finds an unrelated 32-bit copy on PATH.
 #
-# Instead: stage the SDL backend, then walk the actual PE import graph and pull
-# in the full transitive closure of non-OS dependencies. Anything unresolvable
+# Instead: walk the actual PE import graph and pull in the full transitive
+# closure of non-OS dependencies. Anything unresolvable
 # fails the release rather than shipping. Builds that link the MinGW runtime
 # statically (SNESRECOMP_STATIC_RUNTIME, the default) correctly ship no
-# libgcc/libstdc++/libwinpthread at all.
+# libgcc/libstdc++/libwinpthread at all. A statically linked SDL backend likewise
+# needs no separate SDL DLL; a dynamic backend is resolved from its imports.
 . (Join-Path $EngineRoot 'tools\release\RuntimeDllClosure.ps1')
-
-$sdlDll = "$SdlBackend.dll"
-$sdlSource = Join-Path $build $sdlDll
-if (-not (Test-Path -LiteralPath $sdlSource)) {
-  $sdlSource = Join-Path $RuntimeBinDir $sdlDll
-}
-if (-not (Test-Path -LiteralPath $sdlSource)) {
-  throw "Required $SdlBackend runtime DLL missing from build or runtime bin: $sdlDll"
-}
-Copy-Item -LiteralPath $sdlSource -Destination $stage
 
 $stagedDlls = Copy-RuntimeDllClosure -StageDir $stage -SearchDirs @($build, $RuntimeBinDir)
 if ($stagedDlls.Count -gt 0) {

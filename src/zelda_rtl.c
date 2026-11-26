@@ -7,7 +7,16 @@
 #include "debug_server.h"
 #include "cpu_trace.h"
 #include "widescreen.h"  // g_ws_extra, PpuSetExtraSideSpace via snes/ppu.h
-#include "snes/interp_bridge.h"   /* faithful LLE of the $8034 main loop */
+#include "snes/interp_bridge.h"
+#include <stdio.h>
+#include <stdlib.h>
+#ifndef ZELDA_SCHEDULER_LLE
+#define ZELDA_SCHEDULER_LLE 0
+#endif
+
+static void ZeldaCallThreadRoutine(RecompReturn (*routine)(CpuState *),
+                                   uint16 return_address, bool long_call,
+                                   unsigned entry_mode);
 
 /* HLE the polyhedral coroutine that the SNES runs on a separate stack
  * (NMI tail context-switches into it; it loops at $09:F81D, runs one
@@ -39,40 +48,46 @@
  * two-flag handshake remains intact.
  *
  * Poly thread enters at $09:F81D with D=$1F00, DB=$09, PB=$09, P=$30
- * (m=1, x=1) per kPolyThreadInit. Call the M1X1 variants; save/restore
- * main-thread CPU context around the slice so subsequent main-thread
- * code keeps D=DB=PB=0.
+ * (m=1, x=1) per kPolyThreadInit. Follow each callee's width changes;
+ * save/restore main-thread CPU context around the slice so subsequent
+ * main-thread code keeps its own registers and stack.
  */
 static void ZeldaRunPolyLoop(void) {
   if (g_ram[0x1F00] == 0)    return;   /* intro_did_run_step */
   if (g_ram[0x1F0C] != 0)    return;   /* nmi_flag_update_polyhedral */
 
-  const uint16 saved_D  = g_cpu.D;
-  const uint8  saved_DB = g_cpu.DB;
-  const uint8  saved_PB = g_cpu.PB;
-  const uint8  saved_P  = g_cpu.P;
-  const uint8  saved_m  = g_cpu.m_flag;
-  const uint8  saved_x  = g_cpu.x_flag;
+  cpu_mirrors_to_p(&g_cpu);
+  const CpuState main_cpu = g_cpu;
 
+  /* kPolyThreadInit restores 13 bytes from $1F32..$1F3E before
+   * entering $09:F81D. Guest calls must use that thread's stack and
+   * paired return frames, rather than popping through the main stack
+   * into the HUD variables at $0202. */
+  g_cpu.S      = 0x1F3E;
   g_cpu.D      = 0x1F00;
   g_cpu.DB     = 0x09;
   g_cpu.PB     = 0x09;
   g_cpu.P      = 0x30;            /* m=1, x=1, others clear */
   cpu_p_to_mirrors(&g_cpu);
 
-  Polyhedral_EmptyBitMapBuffer_M1X1(&g_cpu);
-  Polyhedral_SetShapePointer_M1X1(&g_cpu);
-  Polyhedral_SetRotationMatrix_M1X1(&g_cpu);
-  Polyhedral_OperateRotation_M1X1(&g_cpu);
-  Polyhedral_DrawPolyhedron_M1X1(&g_cpu);
+  /* Preserve the original callees' width transitions: shape leaves M0X0,
+   * the matrix leaves M0X1, and rotation restores M1X1. */
+  ZeldaCallThreadRoutine(Polyhedral_EmptyBitMapBuffer_M1X1, 0xF828, true, 3);
+  ZeldaCallThreadRoutine(Polyhedral_SetShapePointer_M1X1, 0xF82B, false, 3);
+  ZeldaCallThreadRoutine(Polyhedral_SetRotationMatrix_M0X0, 0xF82E, false, 0);
+  ZeldaCallThreadRoutine(Polyhedral_OperateRotation_M0X1, 0xF831, false, 1);
+  ZeldaCallThreadRoutine(Polyhedral_DrawPolyhedron_M1X1, 0xF834, false, 3);
 
-  g_cpu.D      = saved_D;
-  g_cpu.DB     = saved_DB;
-  g_cpu.PB     = saved_PB;
-  g_cpu.P      = saved_P;
-  g_cpu.m_flag = saved_m;
-  g_cpu.x_flag = saved_x;
-  cpu_p_to_mirrors(&g_cpu);
+  /* The coroutine has separate registers, but its bus work still elapsed. */
+  const uint64_t cycles = g_cpu.cycles;
+  const uint64_t master_cycles = g_cpu.master_cycles;
+  const uint64_t coprocessor_master_cycles = g_cpu.coprocessor_master_cycles;
+  const uint8 open_bus = g_cpu.open_bus;
+  g_cpu = main_cpu;
+  g_cpu.cycles = cycles;
+  g_cpu.master_cycles = master_cycles;
+  g_cpu.coprocessor_master_cycles = coprocessor_master_cycles;
+  g_cpu.open_bus = open_bus;
 
   g_ram[0x1F00] = 0x00;
   g_ram[0x1F0C] = 0xFF;
@@ -250,7 +265,69 @@ void ZeldaRestoreFrameDriverState(uint32_t state) {
   g_first_frame_done = (state & 2) != 0;
 }
 
+static void ZeldaCallThreadRoutine(RecompReturn (*routine)(CpuState *),
+                                   uint16 return_address, bool long_call,
+                                   unsigned entry_mode) {
+  CpuState *cpu = &g_cpu;
+  const uint16 stack = cpu->S;
+  const uint8 bank = cpu->PB;
+  if ((((unsigned)cpu->m_flag << 1) | cpu->x_flag) != entry_mode) {
+    fprintf(stderr, "[zelda] unexpected scheduler widths before return $%04X\n",
+            return_address + 1u);
+    abort();
+  }
+  /* Native RTS/RTL reads the guest return frame. Use the real address so
+   * a routine that observes its caller sees the original stack bytes. */
+  if (long_call) {
+    cpu_write8(cpu, 0, cpu->S, bank);
+    --cpu->S;
+  }
+  cpu_write8(cpu, 0, cpu->S, (uint8)(return_address >> 8));
+  --cpu->S;
+  cpu_write8(cpu, 0, cpu->S, (uint8)return_address);
+  --cpu->S;
+  cpu->host_return_valid = long_call ? 3 : 2;
+  if (routine(cpu) != RECOMP_RETURN_NORMAL || cpu->S != stack) {
+    fprintf(stderr, "[zelda] invalid scheduler return at $%04X, stack $%04X (expected $%04X)\n",
+            return_address + 1u, cpu->S, stack);
+    abort();
+  }
+  cpu->host_return_valid = 0;
+  cpu->PB = bank;
+}
+
+#if !ZELDA_SCHEDULER_LLE
+extern int g_interp_apu_driving;
+static void (*zelda_previous_pc_hook)(uint32_t, int, int);
+static void ZeldaRequireHostSchedulerOpcode(uint32_t pc, int m, int x) {
+  /* The shared observer also sees region-paced native instructions. The
+   * bridge clears its driving flag around those native calls, and invokes
+   * this observer before interp816_runOpcode for an interpreted instruction. */
+  /* This provider replaces the original main-loop scheduler only. Ordinary
+   * guest routines retain the authoritative CPU dispatcher and its existing
+   * AOT/interpreter coverage. No guest scheduler instruction may run here. */
+  if (g_interp_apu_driving && pc >= 0x008034 && pc < 0x008061) {
+    fprintf(stderr, "[zelda] HLE scheduler entered guest interpreter at $%06X M%dX%d\n",
+            (unsigned)pc, m, x);
+    abort();
+  }
+  if (zelda_previous_pc_hook) zelda_previous_pc_hook(pc, m, x);
+}
+static void ZeldaRequireHostScheduler(void) {
+  static bool initialized;
+  if (!initialized) {
+    zelda_previous_pc_hook = g_interp_bridge_pc_hook;
+    g_interp_bridge_pc_hook = ZeldaRequireHostSchedulerOpcode;
+    fprintf(stderr, "[zelda] frame scheduler: HLE; owned scheduler interpretation disabled; guest CPU dispatcher active\n");
+    initialized = true;
+  }
+}
+#endif
+
 void RunOneFrameOfGame(void) {
+#if !ZELDA_SCHEDULER_LLE
+  ZeldaRequireHostScheduler();
+#endif
   // First-call reset gate. Was previously `if (*(uint16*)$7F8000 == 0) I_RESET()`,
   // which silently relied on WRAM being zero-initialized at power-on. Real hardware
   // (and snes9x) power-on WRAM is 0x55, so that check would never fire and I_RESET
@@ -334,31 +411,28 @@ void RunOneFrameOfGame(void) {
    * boot-time REP #$38 in I_RESET is expected and intentional; we only
    * want to know where x flips during ProcessGameMode dispatch. */
   cpu_trace_arm_px_tripwire();
-  /* Swappable scheduler tier (mirrors mmx_rtl.c / smw_rtl.c). ALttP has no
-   * cooperative task scheduler — its "scheduler" is the single main loop at
-   * $00:8034:
-   *     $8034: LDA $12 ; BEQ $8034            ; vblank-wait spin (NMI sets $12)
-   *            ... INC $1A ; JSR ClearOamBuffer ; JSL Module_MainRouting ;
-   *            JSR NMI_PrepareSprites ; STZ $12 ; BRA $8034
-   * so LLE is interp_bridge_run_scheduler with entry == yield == the spin PC
-   * (bank $00 — reset leaves PB=$00 and the BRA loop never leaves bank 0) and
-   * flag == waiting_for_vblank ($12). The interp runs the real per-frame body
-   * (incl. the alternate-frame slowdown path the HLE reproduces by hand) and
-   * bounces module code to compiled bodies via the paired ABI (or interprets
-   * when SNESRECOMP_LLE_BOUNCE=0). I_NMI already set $12 != 0; force it too so
-   * frame 0 (I_NMI skipped) processes — matches MMX's waiting_for_vblank=0xFF.
-   *
-   * LLE is the default correctness path. The existing HLE frame driver stays
-   * available as a convenience override through the shared execution-mode
-   * option rather than a Zelda-specific scheduler switch. */
-  {
-    /* LLE-only (HLE removed 2026-07-19). The hand-written HLE frame driver
-     * crashed during early gameplay (M/X width claim mismatch); LLE is the
-     * committed correctness floor, so the faithful $00:8034 scheduler is the
-     * one and only per-frame path now. */
-    waiting_for_vblank = 0xFF;
-    interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
-  }
+  waiting_for_vblank = 0xFF;
+#if ZELDA_SCHEDULER_LLE
+  interp_bridge_run_scheduler(&g_cpu, 0x008034, 0x008034, 0x0012);
+#else
+  /* The host owns NMI and the polyhedral slice. Enter the active frame
+   * with RESET's SEP #$30 widths and the results of the vblank read/CLI. */
+  g_cpu.m_flag = g_cpu.x_flag = 1;
+  g_cpu.X &= 0xFFu;
+  g_cpu.Y &= 0xFFu;
+  cpu_write_a_m(&g_cpu, waiting_for_vblank);
+  g_cpu._flag_I = 0;
+  const uint8 frame = (uint8)(cpu_read8(&g_cpu, 0, 0x1a) + 1);
+  cpu_write8(&g_cpu, 0, 0x1a, frame);
+  g_cpu._flag_N = (frame & 0x80) != 0;
+  g_cpu._flag_Z = frame == 0;
+  cpu_mirrors_to_p(&g_cpu);
+
+  ZeldaCallThreadRoutine(ClearOamBuffer_M1X1, 0x8055, false, 3);
+  ZeldaCallThreadRoutine(Module_MainRouting_M1X1, 0x8059, true, 3);
+  ZeldaCallThreadRoutine(NMI_PrepareSprites_M1X1, 0x805c, false, 3);
+  cpu_write8(&g_cpu, 0, 0x12, 0);
+#endif
   ZeldaRestoreMainCpuAbi();
   cpu_trace_px_breadcrumb(&g_cpu, 0x2003, "after_Internal");
   g_first_frame_done = true;

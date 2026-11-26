@@ -106,8 +106,9 @@ System shortcuts (configured in `config.ini`'s `[KeyMap]` section):
 
 ## Adaptive widescreen
 
-Enable **Adaptive view** in the launcher, or set `Widescreen = 1` under
-`[Graphics]` in `config.ini`. The logical height remains 224 pixels while the
+**Widescreen (adaptive)** is enabled by default on the launcher's **Mods** page.
+Turn it off there for the original view; saved on/off choices are preserved.
+The logical height remains 224 pixels while the
 logical width follows the live window or fullscreen aspect ratio. Resizing a
 window wider therefore reveals more of the overworld or dungeon instead of
 stretching a fixed 16:9 image. At the native aspect the renderer returns to the
@@ -152,10 +153,10 @@ section.
    ```bash
    bash tools/regen.sh            # add --no-tests to skip the framework suite
    ```
-   This applies the bundled MSU-1 patch to a throwaway copy of your stock
-   ROM (`tools/apply_msu_patch.py`), regenerates `src/gen/` from the
-   patched image, and syncs `recomp/funcs.h`. Your stock ROM is left
-   untouched and is what you load at runtime. The script builds and requires
+   This verifies and analyzes the original image identified by
+   `rom_identity.txt`, regenerates `src/gen/`, and syncs `recomp/funcs.h`.
+   Keep that original image read-only; do not recompile a modified copy.
+   Generation hooks are declared in `recomp/generate.toml`. The script builds and requires
    the fast native analyzer; set `SNESRECOMP_ANALYSIS_BACKEND=python` only to
    run the slower reference implementation.
 3. Rebuild as above.
@@ -295,3 +296,7 @@ redistribution.
 ## Coverage survey and regeneration
 
 Game-owned generation policy is in `recomp/generate.toml`; the shared framework runs the same hooks for `tools/regen.sh` and launcher rebuilds. See the [2026-10-18 coverage survey](docs/COVERAGE_2026-10-18.md) for verified ROM identity, observed scenes, corrections, and remaining validation limits.
+
+The normal title frame scheduler is host-native (`ZELDA_SCHEDULER_IMPL=HLE`). The host owns vblank orchestration and the main-loop yield, while OAM, game-module and sprite routines retain the authoritative guest CPU dispatcher. Native APU timing and DSP mixing remain selected. A separate developer reference is selectable at build time with `ZELDA_SCHEDULER_IMPL=LLE`.
+
+The polyhedral coroutine retains its dedicated guest stack and paired return frames. Its register context stays separate from the main thread, preventing its calls from overwriting the selected-item HUD state. The framework's optional Lua TCP interface is also available when built with `SNESRECOMP_ENABLE_LUA=ON`.

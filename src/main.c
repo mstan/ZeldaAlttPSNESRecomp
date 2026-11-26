@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "debug_server.h"
+#include "lua_bridge.h"
 #include "desktop/sdl_compat.h"
 #ifdef _WIN32
 #include <windows.h>
@@ -1515,6 +1516,20 @@ error_reading:;
   MkDir("saves");
     
   RtlReadSram();
+#if SNESRECOMP_ENABLE_LUA
+  {
+    const char *port_text = getenv("SNESRECOMP_LUA_PORT");
+    if (port_text && *port_text) {
+      char *end;
+      long port = strtol(port_text, &end, 10);
+      if (*end || port < 1 || port > 65535 ||
+          lua_bridge_init(snes->ram, 0x20000, kRom, kRom_SIZE, (int)port) != 0) {
+        fprintf(stderr, "[lua] Could not start requested Lua TCP server\n");
+        return 1;
+      }
+    }
+  }
+#endif
 
   {
 #if SNESRECOMP_SDL3
@@ -1652,6 +1667,11 @@ error_reading:;
         SetAudioPaused(audiopaused);
     }
 
+    lua_bridge_poll();
+    if (lua_bridge_paused()) {
+      SDL_Delay(16);
+      continue;
+    }
     if (g_paused) {
       if (ZeldaWorldEnabled()) DrawPpuFrameWithPerf();
       SDL_Delay(16);
@@ -1697,7 +1717,9 @@ error_reading:;
     inputs |= TickScript();
     inputs |= HeadlessCapture_InputWord(frameCtr + 1);
     inputs |= debug_server_get_controller_inputs();
+    inputs = lua_bridge_frame_start(inputs);
     RtlRunFrame(inputs | GetActiveControllers() | debug_server_get_controller_active_mask());
+    lua_bridge_frame_end();
 
 #ifdef ENABLE_ORACLE_BACKEND
     // Step the oracle emulator with the same input. First-light does
@@ -1794,6 +1816,7 @@ error_reading:;
     }
   }
 
+  lua_bridge_shutdown();
   HeadlessCapture_Finish();
   if (g_config.autosave)
     HandleCommand(kKeys_Save + 0, true);

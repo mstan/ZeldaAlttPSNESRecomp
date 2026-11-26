@@ -88,6 +88,14 @@ add_executable(ZeldaALttPSNESRecomp
     ${ZELDA_GEN_SOURCES}
 )
 
+set(ZELDA_SCHEDULER_IMPL "HLE" CACHE STRING "A Link to the Past main-loop scheduler (HLE or LLE)")
+set_property(CACHE ZELDA_SCHEDULER_IMPL PROPERTY STRINGS HLE LLE)
+if(NOT ZELDA_SCHEDULER_IMPL MATCHES "^(HLE|LLE)$")
+    message(FATAL_ERROR "ZELDA_SCHEDULER_IMPL must be HLE or LLE")
+endif()
+set_property(SOURCE src/zelda_rtl.c APPEND PROPERTY COMPILE_DEFINITIONS
+    ZELDA_SCHEDULER_LLE=$<STREQUAL:${ZELDA_SCHEDULER_IMPL},LLE>)
+
 # Scoped to main.c, which is the only consumer (host_report_init).
 set_property(SOURCE src/main.c APPEND PROPERTY COMPILE_DEFINITIONS
     SNESRECOMP_BUILD_VERSION="${SNESRECOMP_BUILD_VERSION}")
