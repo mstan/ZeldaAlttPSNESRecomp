@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generic gamepad glyph (original artwork). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#D8B44A"
+        android:pathData="M36,38 L72,38 C82,38 88,46 88,56 C88,66 82,72 76,72 C71,72 68,68 64,64 L44,64 C40,68 37,72 32,72 C26,72 20,66 20,56 C20,46 26,38 36,38 Z" />
+    <path android:fillColor="#101814"
+        android:pathData="M33,48 L39,48 L39,53 L44,53 L44,59 L39,59 L39,64 L33,64 L33,59 L28,59 L28,53 L33,53 Z" />
+    <path android:fillColor="#101814" android:pathData="M72,50 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#101814" android:pathData="M80,58 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#101814" android:pathData="M64,58 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+</vector>

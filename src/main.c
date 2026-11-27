@@ -55,6 +55,11 @@
 #include "host_report.h"
 #include "widescreen.h"  // g_ws_active, g_ws_extra, RtlWidescreenPresent
 #include "snes/color_lut.h"  // opt-in present-time CRT color LUT (SNESRECOMP_SCREEN)
+#ifdef __ANDROID__
+/* Android port: touch overlay + menu commands arrive from the Java UI thread
+ * through android_host.c and are consumed here on the SDL thread. */
+#include "android_host.h"
+#endif
 
 typedef struct GamepadInfo {
   uint32 modifiers;
@@ -916,6 +921,14 @@ int main(int argc, char** argv) {
    * keybinds.ini, rom.cfg and saves/ there, however the process was
    * launched. (On read-only installs the anchor declines and cwd
    * stays authoritative; see launcher.h.) */
+#ifdef __ANDROID__
+  /* There is no executable directory on Android: config.ini, rom.cfg and
+   * saves/ live in the app's private internal storage. */
+  if (!getenv("SNESRECOMP_DATA_DIR")) {
+    const char *storage = SDL_GetAndroidInternalStoragePath();
+    if (storage && storage[0]) setenv("SNESRECOMP_DATA_DIR", storage, 1);
+  }
+#endif
   {
     extern int snesrecomp_anchor_to_exe_dir(void);
     int anchored = snesrecomp_anchor_to_exe_dir();
@@ -948,6 +961,16 @@ int main(int argc, char** argv) {
       ParseConfigFile("config.local.ini");
     }
   }
+#ifdef __ANDROID__
+  /* Android presents through SDL_Renderer (GLES); the desktop GL presenter,
+   * window scaling and windowed mode do not apply. The adaptive widescreen
+   * view (Widescreen = 1, written by the Java launcher) follows the device
+   * aspect ratio, from 4:3 tablets to 21:9 phones. */
+  g_config.output_method = kOutputMethod_SDL;
+  g_config.fullscreen = 1;
+  g_config.window_width = g_config.window_height = 0;
+  g_config.has_keyboard_controls |= 1;
+#endif
   host_report_breadcrumb(
       "config parsed: output=%d new_renderer=%d scale=%d fullscreen=%d "
       "audio=%d freq=%d samples=%d skip_launcher=%d",
@@ -1205,13 +1228,18 @@ int main(int argc, char** argv) {
     }
     }
   }
-  /* Issue #4: co-locate the ROM with the exe (interactive launches only). */
+  /* Issue #4: co-locate the ROM with the exe (interactive launches only).
+   * Android: the launcher already staged it in app storage, and the
+   * /data/user/0 vs /data/data aliases would make this copy the file onto
+   * itself (truncating it). */
+#ifndef __ANDROID__
   if (!start_paused && script_file == NULL && framedump_dir == NULL) {
     if (RelocateRomToExeDir(rom_path_buf, sizeof(rom_path_buf))) {
       FILE *rc = fopen("rom.cfg", "w");
       if (rc) { fprintf(rc, "%s\n", rom_path_buf); fclose(rc); }
     }
   }
+#endif
 
   static char *resolved_argv[2];
   resolved_argv[0] = rom_path_buf;
@@ -1654,9 +1682,24 @@ error_reading:;
       case SDL_QUIT:
         running = false;
         break;
+#ifdef __ANDROID__
+      case SDL_EVENT_WILL_ENTER_BACKGROUND:
+      case SDL_EVENT_TERMINATING:
+        /* The process may be killed while backgrounded: flush the cartridge
+         * save now, not only on a clean exit. */
+        RtlWriteSram();
+        break;
+      case SDL_EVENT_DID_ENTER_FOREGROUND:
+        lastTick = SDL_GetTicks();
+        break;
+#endif
       }
     }
 
+#ifdef __ANDROID__
+    snesrecomp_android_commands(&running, &g_paused);
+    if (!running) break;
+#endif
     // Poll the renderer instead of relying on backend-specific resize events.
     // This also follows fullscreen/display and HiDPI drawable changes.
     UpdateAdaptiveWidescreen();
@@ -1715,6 +1758,9 @@ error_reading:;
 
     uint32 inputs = g_input_state | g_pad_buttons | g_gamepad[0].axis_buttons | g_gamepad[1].axis_buttons << 12;
     inputs |= TickScript();
+#ifdef __ANDROID__
+    inputs |= snesrecomp_android_buttons();
+#endif
     inputs |= HeadlessCapture_InputWord(frameCtr + 1);
     inputs |= debug_server_get_controller_inputs();
     inputs = lua_bridge_frame_start(inputs);
